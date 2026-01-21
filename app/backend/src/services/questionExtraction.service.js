@@ -133,11 +133,25 @@ export const questionExtractionService = {
         .select()
         .single();
 
+      if (error) throw error;
+
       if (data) {
+        console.log(`[EXTRACT] Question Set ID: ${data.id}`);
         console.log(`[EXTRACT] Saved to DB. Returned questions count: ${data.questions?.questions?.length || 0}`);
+        console.log(`[EXTRACT] total_questions field: ${data.total_questions}`);
       }
 
-      if (error) throw error;
+      // Verify by re-fetching
+      const { data: verifyData } = await supabase
+        .from('question_sets')
+        .select('id, questions, total_questions')
+        .eq('id', questionSetId)
+        .single();
+
+      if (verifyData) {
+        console.log(`[EXTRACT] VERIFY - Re-fetched questions count: ${verifyData.questions?.questions?.length || 0}`);
+      }
+
       return data;
     } catch (error) {
       console.error('Question extraction error:', error);
