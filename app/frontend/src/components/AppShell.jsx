@@ -1,12 +1,9 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { Home, Settings, ScanLine, Book, LogOut } from 'lucide-react';
+import { Home, LogOut } from 'lucide-react';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: Home },
-  { path: '/job-config', label: 'Job Config', icon: Settings },
-  { path: '/scanned-items', label: 'Scanned Items', icon: ScanLine },
-  { path: '/books', label: 'Books', icon: Book },
+  { path: '/', label: 'Home', icon: Home },
 ];
 
 export default function AppShell({ children }) {

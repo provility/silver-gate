@@ -42,14 +42,30 @@ app.use((req, res) => {
 
 // Initialize email monitoring
 async function initEmailMonitoring() {
+  console.log('');
+  logger.info('EMAIL', '════════════════════════════════════════════════');
+  logger.info('EMAIL', '  Email Scanning Service - Initializing...');
+  logger.info('EMAIL', '════════════════════════════════════════════════');
+
   try {
     await emailInboundService.connect();
     if (emailInboundService.isConnected()) {
       await emailInboundService.startMonitoring('INBOX');
-      logger.success('EMAIL', 'IMAP monitoring started');
+      const status = emailInboundService.getStatus();
+      logger.success('EMAIL', '────────────────────────────────────────────────');
+      logger.success('EMAIL', '  ✓ Email Scanning Service STARTED');
+      logger.success('EMAIL', `  ✓ Monitoring: ${status.email}`);
+      logger.success('EMAIL', `  ✓ IMAP Host: ${status.host}`);
+      logger.success('EMAIL', `  ✓ Folder: ${status.currentFolder}`);
+      logger.success('EMAIL', '  ✓ Status: IDLE - Waiting for new emails...');
+      logger.success('EMAIL', '────────────────────────────────────────────────');
+      console.log('');
+    } else {
+      logger.warn('EMAIL', 'Email service not connected - scanning disabled');
     }
   } catch (error) {
     logger.error('EMAIL', `Failed to initialize: ${error.message}`);
+    logger.warn('EMAIL', 'Email scanning service disabled - server continues without it');
     // Don't crash the server if email monitoring fails
   }
 }

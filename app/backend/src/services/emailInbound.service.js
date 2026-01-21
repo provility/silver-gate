@@ -18,11 +18,12 @@ export const emailInboundService = {
   connect() {
     return new Promise((resolve, reject) => {
       if (!config.imap.user || !config.imap.password) {
-        logger.warn('EMAIL', 'IMAP credentials not configured - skipping');
+        logger.warn('EMAIL', 'IMAP credentials not configured');
+        logger.warn('EMAIL', 'Set EMAIL_ADDRESS and EMAIL_PASSWORD in .env');
         return resolve();
       }
 
-      logger.info('EMAIL', `Connecting to ${config.imap.host}...`);
+      logger.info('EMAIL', `Connecting to IMAP server: ${config.imap.host}:${config.imap.port}`);
 
       this.imap = new Imap({
         user: config.imap.user,
@@ -106,7 +107,10 @@ export const emailInboundService = {
 
     // Listen for new mail
     this.imap.on('mail', async (numNewMsgs) => {
-      logger.info('EMAIL', `${numNewMsgs} new email(s) detected`);
+      console.log('');
+      logger.info('EMAIL', '┌──────────────────────────────────────────────┐');
+      logger.info('EMAIL', `│  📧 NEW EMAIL RECEIVED (${numNewMsgs} message${numNewMsgs > 1 ? 's' : ''})`.padEnd(47) + '│');
+      logger.info('EMAIL', '└──────────────────────────────────────────────┘');
 
       try {
         await this.fetchNewEmails(numNewMsgs, folder);
@@ -115,7 +119,7 @@ export const emailInboundService = {
       }
     });
 
-    logger.success('EMAIL', `IDLE monitoring on ${folder}`);
+    logger.info('EMAIL', `IDLE monitoring active on ${folder}`);
   },
 
   /**
@@ -138,13 +142,13 @@ export const emailInboundService = {
         if (err) return reject(err);
 
         if (!uids || uids.length === 0) {
-          logger.debug('EMAIL', 'No unseen emails found');
+          logger.info('EMAIL', 'No unseen emails to process');
           return resolve([]);
         }
 
         // Take the last 'count' emails
         const targetUids = uids.slice(-count);
-        logger.info('EMAIL', `Processing ${targetUids.length} email(s)`);
+        logger.info('EMAIL', `Processing ${targetUids.length} unseen email(s)...`);
 
         for (const uid of targetUids) {
           try {
@@ -231,15 +235,23 @@ export const emailInboundService = {
    * Process an email - extract PDF attachments and store in scanned_items
    */
   async processEmail(email) {
-    logger.info('EMAIL', `Processing: "${email.subject}" from ${email.from.address}`);
+    logger.info('EMAIL', '─────────────────────────────────────────────────');
+    logger.info('EMAIL', `Subject: "${email.subject}"`);
+    logger.info('EMAIL', `From: ${email.from.address}`);
+    logger.info('EMAIL', `Date: ${email.date}`);
+    logger.info('EMAIL', `Attachments: ${email.attachments.length}`);
 
     // Get active job
     const activeJob = await jobService.getActiveJob();
 
     if (!activeJob) {
-      logger.warn('EMAIL', `No active job - skipping: ${email.subject}`);
+      logger.warn('EMAIL', 'No active job configured - email skipped');
+      logger.warn('EMAIL', 'Configure an active job in Job Config to process emails');
+      logger.info('EMAIL', '─────────────────────────────────────────────────');
       return;
     }
+
+    logger.info('EMAIL', `Active Job: Book=${activeJob.active_book_id}, Chapter=${activeJob.active_chapter_id}`);
 
     // Filter PDF attachments
     const pdfAttachments = email.attachments.filter(
@@ -247,11 +259,12 @@ export const emailInboundService = {
     );
 
     if (pdfAttachments.length === 0) {
-      logger.debug('EMAIL', 'No PDF attachments - skipping');
+      logger.info('EMAIL', 'No PDF attachments found - email skipped');
+      logger.info('EMAIL', '─────────────────────────────────────────────────');
       return;
     }
 
-    logger.info('EMAIL', `Found ${pdfAttachments.length} PDF attachment(s)`);
+    logger.success('EMAIL', `Found ${pdfAttachments.length} PDF attachment(s) to process`);
 
     for (const attachment of pdfAttachments) {
       try {
@@ -260,13 +273,21 @@ export const emailInboundService = {
         logger.error('EMAIL', `Failed to save "${attachment.filename}": ${err.message}`);
       }
     }
+
+    logger.success('EMAIL', 'Email processing complete');
+    logger.info('EMAIL', '─────────────────────────────────────────────────');
+    console.log('');
   },
 
   /**
    * Save a PDF attachment as a scanned item
    */
   async saveAttachmentAsScannedItem(attachment, email, activeJob) {
-    logger.info('SCAN', `Saving: ${attachment.filename} (${Math.round(attachment.size / 1024)}KB)`);
+    logger.info('SCAN', `┌─ Saving Attachment ─────────────────────────────`);
+    logger.info('SCAN', `│ File: ${attachment.filename}`);
+    logger.info('SCAN', `│ Size: ${Math.round(attachment.size / 1024)}KB`);
+    logger.info('SCAN', `│ Type: ${activeJob.active_item_type || 'question'}`);
+    logger.info('SCAN', `└─────────────────────────────────────────────────`);
 
     // Insert into scanned_items with BYTEA content
     const { data, error } = await supabase
@@ -297,10 +318,10 @@ export const emailInboundService = {
       throw error;
     }
 
-    logger.success('SCAN', `Created item: ${data.id}`);
+    logger.success('SCAN', `✓ Scanned item created: ${data.id}`);
 
     // Trigger MathPix conversion asynchronously
-    this.triggerMathPixConversion(data.id, attachment.content);
+    this.triggerMathPixConversion(data.id, attachment.content, attachment.filename);
 
     return data;
   },
@@ -308,15 +329,16 @@ export const emailInboundService = {
   /**
    * Trigger MathPix conversion for email attachment
    */
-  async triggerMathPixConversion(scannedItemId, contentBuffer) {
+  async triggerMathPixConversion(scannedItemId, contentBuffer, filename) {
     try {
-      logger.info('MATHPIX', `Starting conversion for ${scannedItemId}`);
+      logger.info('MATHPIX', `Starting PDF→LaTeX conversion...`);
+      logger.info('MATHPIX', `Item ID: ${scannedItemId}`);
       // Convert buffer to base64 for MathPix API
       const base64Content = contentBuffer.toString('base64');
       await mathpixService.convertPdfToLatex(base64Content, scannedItemId);
-      logger.success('MATHPIX', `Conversion complete: ${scannedItemId}`);
+      logger.success('MATHPIX', `✓ Conversion complete for: ${filename || scannedItemId}`);
     } catch (err) {
-      logger.error('MATHPIX', `Conversion failed for ${scannedItemId}: ${err.message}`);
+      logger.error('MATHPIX', `✗ Conversion failed: ${err.message}`);
     }
   },
 

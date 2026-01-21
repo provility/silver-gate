@@ -29,6 +29,11 @@ export const config = {
     authTimeout: parseInt(process.env.IMAP_AUTH_TIMEOUT || '30000', 10),
     connTimeout: parseInt(process.env.IMAP_CONN_TIMEOUT || '30000', 10),
   },
+  googleDrive: {
+    clientEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    privateKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    rootFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
+  },
 };
 
 export default config;

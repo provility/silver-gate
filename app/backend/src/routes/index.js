@@ -5,6 +5,7 @@ import chaptersRoutes from './chapters.js';
 import jobsRoutes from './jobs.js';
 import scannedItemsRoutes from './scannedItems.js';
 import questionSetsRoutes from './questionSets.js';
+import driveRoutes from './drive.js';
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use('/chapters', chaptersRoutes);
 router.use('/jobs', jobsRoutes);
 router.use('/scanned-items', scannedItemsRoutes);
 router.use('/question-sets', questionSetsRoutes);
+router.use('/drive', driveRoutes);
 
 export default router;

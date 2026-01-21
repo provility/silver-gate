@@ -7,13 +7,29 @@ const router = Router();
 
 // Login
 router.post('/login', asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ success: false, error: 'Email and password are required' });
+  if (!username || !password) {
+    return res.status(400).json({ success: false, error: 'Username and password are required' });
   }
 
-  const user = await userService.findByEmail(email);
+  // Hardcoded admin user for internal app
+  if (username === 'admin' && password === 'admin') {
+    const adminUser = {
+      id: 'admin',
+      email: 'admin@localhost',
+      name: 'Admin',
+      role: 'admin',
+    };
+    const token = userService.generateToken(adminUser);
+    return res.json({
+      success: true,
+      data: { token, user: adminUser },
+    });
+  }
+
+  // Fallback to database user lookup (by email)
+  const user = await userService.findByEmail(username);
   if (!user) {
     return res.status(401).json({ success: false, error: 'Invalid credentials' });
   }

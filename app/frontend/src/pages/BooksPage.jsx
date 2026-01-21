@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { Book, ChevronRight, ChevronDown, FileText, Plus, X } from 'lucide-react';
+import { Book, ChevronRight, ChevronDown, FileText, Plus, X, Pencil, Trash2 } from 'lucide-react';
 
 export default function BooksPage() {
   const queryClient = useQueryClient();
   const [expandedBooks, setExpandedBooks] = useState({});
   const [showAddBookModal, setShowAddBookModal] = useState(false);
   const [showAddChapterModal, setShowAddChapterModal] = useState(null);
+  const [editingBook, setEditingBook] = useState(null);
+  const [editingChapter, setEditingChapter] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState({ type: null, item: null });
   const [newBook, setNewBook] = useState({ name: '', display_name: '', description: '' });
   const [newChapter, setNewChapter] = useState({ name: '', display_name: '', chapter_number: '' });
 
@@ -53,6 +56,43 @@ export default function BooksPage() {
     },
   });
 
+  // Update book mutation
+  const updateBookMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/books/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+      setEditingBook(null);
+    },
+  });
+
+  // Update chapter mutation
+  const updateChapterMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/chapters/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['allChapters'] });
+      setEditingChapter(null);
+    },
+  });
+
+  // Delete book mutation
+  const deleteBookMutation = useMutation({
+    mutationFn: (id) => api.delete(`/books/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['books'] });
+      queryClient.invalidateQueries({ queryKey: ['allChapters'] });
+      setDeleteConfirm({ type: null, item: null });
+    },
+  });
+
+  // Delete chapter mutation
+  const deleteChapterMutation = useMutation({
+    mutationFn: (id) => api.delete(`/chapters/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['allChapters'] });
+      setDeleteConfirm({ type: null, item: null });
+    },
+  });
+
   const toggleBook = (bookId) => {
     setExpandedBooks((prev) => ({
       ...prev,
@@ -73,6 +113,40 @@ export default function BooksPage() {
         book_id: showAddChapterModal,
         chapter_number: newChapter.chapter_number ? parseInt(newChapter.chapter_number, 10) : null,
       });
+    }
+  };
+
+  const handleUpdateBook = () => {
+    if (editingBook && editingBook.name.trim()) {
+      updateBookMutation.mutate({
+        id: editingBook.id,
+        data: {
+          name: editingBook.name,
+          display_name: editingBook.display_name,
+          description: editingBook.description,
+        },
+      });
+    }
+  };
+
+  const handleUpdateChapter = () => {
+    if (editingChapter && editingChapter.name.trim()) {
+      updateChapterMutation.mutate({
+        id: editingChapter.id,
+        data: {
+          name: editingChapter.name,
+          display_name: editingChapter.display_name,
+          chapter_number: editingChapter.chapter_number ? parseInt(editingChapter.chapter_number, 10) : null,
+        },
+      });
+    }
+  };
+
+  const handleDelete = () => {
+    if (deleteConfirm.type === 'book') {
+      deleteBookMutation.mutate(deleteConfirm.item.id);
+    } else if (deleteConfirm.type === 'chapter') {
+      deleteChapterMutation.mutate(deleteConfirm.item.id);
     }
   };
 
@@ -132,9 +206,31 @@ export default function BooksPage() {
                     )}
                   </div>
                 </div>
-                <span className="text-sm text-gray-500">
-                  {chaptersMap?.[book.id]?.length || 0} chapters
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-500">
+                    {chaptersMap?.[book.id]?.length || 0} chapters
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingBook({ ...book });
+                    }}
+                    className="p-1 text-gray-400 hover:text-blue-600"
+                    title="Edit book"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteConfirm({ type: 'book', item: book });
+                    }}
+                    className="p-1 text-gray-400 hover:text-red-600"
+                    title="Delete book"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {expandedBooks[book.id] && (
@@ -144,17 +240,41 @@ export default function BooksPage() {
                       {chaptersMap[book.id].map((chapter) => (
                         <div
                           key={chapter.id}
-                          className="flex items-center p-3 bg-gray-50 rounded-lg"
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                         >
-                          <FileText className="w-4 h-4 text-green-600 mr-3" />
-                          <span className="text-gray-700">
-                            {chapter.chapter_number && (
-                              <span className="text-gray-500 mr-2">
-                                Ch {chapter.chapter_number}:
-                              </span>
-                            )}
-                            {chapter.display_name || chapter.name}
-                          </span>
+                          <div className="flex items-center">
+                            <FileText className="w-4 h-4 text-green-600 mr-3" />
+                            <span className="text-gray-700">
+                              {chapter.chapter_number && (
+                                <span className="text-gray-500 mr-2">
+                                  Ch {chapter.chapter_number}:
+                                </span>
+                              )}
+                              {chapter.display_name || chapter.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingChapter({ ...chapter });
+                              }}
+                              className="p-1 text-gray-400 hover:text-blue-600"
+                              title="Edit chapter"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirm({ type: 'chapter', item: chapter });
+                              }}
+                              className="p-1 text-gray-400 hover:text-red-600"
+                              title="Delete chapter"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -320,6 +440,206 @@ export default function BooksPage() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {addChapterMutation.isPending ? 'Adding...' : 'Add Chapter'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Book Modal */}
+      {editingBook && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-800">Edit Book</h2>
+              <button
+                onClick={() => setEditingBook(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Name (ID)
+                </label>
+                <input
+                  type="text"
+                  value={editingBook.name}
+                  onChange={(e) => setEditingBook({ ...editingBook, name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., math_grade10"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  value={editingBook.display_name || ''}
+                  onChange={(e) => setEditingBook({ ...editingBook, display_name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., Mathematics Grade 10"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  value={editingBook.description || ''}
+                  onChange={(e) => setEditingBook({ ...editingBook, description: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  rows={3}
+                  placeholder="Optional description"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t">
+              <button
+                onClick={() => setEditingBook(null)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateBook}
+                disabled={!editingBook.name.trim() || updateBookMutation.isPending}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updateBookMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Chapter Modal */}
+      {editingChapter && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-800">Edit Chapter</h2>
+              <button
+                onClick={() => setEditingChapter(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Chapter Number
+                </label>
+                <input
+                  type="number"
+                  value={editingChapter.chapter_number || ''}
+                  onChange={(e) => setEditingChapter({ ...editingChapter, chapter_number: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., 1"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Name (ID)
+                </label>
+                <input
+                  type="text"
+                  value={editingChapter.name}
+                  onChange={(e) => setEditingChapter({ ...editingChapter, name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., algebra_basics"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  value={editingChapter.display_name || ''}
+                  onChange={(e) => setEditingChapter({ ...editingChapter, display_name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., Algebra Basics"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t">
+              <button
+                onClick={() => setEditingChapter(null)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateChapter}
+                disabled={!editingChapter.name.trim() || updateChapterMutation.isPending}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updateChapterMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm.type && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Delete {deleteConfirm.type === 'book' ? 'Book' : 'Chapter'}
+              </h2>
+              <button
+                onClick={() => setDeleteConfirm({ type: null, item: null })}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4">
+              <p className="text-gray-600">
+                Are you sure you want to delete{' '}
+                <span className="font-medium text-gray-800">
+                  {deleteConfirm.item?.display_name || deleteConfirm.item?.name}
+                </span>
+                ?
+                {deleteConfirm.type === 'book' && (
+                  <span className="block mt-2 text-red-600 text-sm">
+                    This will also delete all chapters in this book.
+                  </span>
+                )}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t">
+              <button
+                onClick={() => setDeleteConfirm({ type: null, item: null })}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleteBookMutation.isPending || deleteChapterMutation.isPending}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteBookMutation.isPending || deleteChapterMutation.isPending
+                  ? 'Deleting...'
+                  : 'Delete'}
               </button>
             </div>
           </div>

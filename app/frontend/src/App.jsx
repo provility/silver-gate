@@ -2,10 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import AppShell from './components/AppShell';
 import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
-import JobConfigPage from './pages/JobConfigPage';
-import ScannedItemsPage from './pages/ScannedItemsPage';
-import BooksPage from './pages/BooksPage';
+import HomePage from './pages/HomePage';
 
 function ProtectedRoute({ children }) {
   const { user, isInitialized } = useAuthStore();
@@ -36,10 +33,7 @@ function App() {
             <ProtectedRoute>
               <AppShell>
                 <Routes>
-                  <Route path="/" element={<DashboardPage />} />
-                  <Route path="/job-config" element={<JobConfigPage />} />
-                  <Route path="/scanned-items" element={<ScannedItemsPage />} />
-                  <Route path="/books" element={<BooksPage />} />
+                  <Route path="/" element={<HomePage />} />
                 </Routes>
               </AppShell>
             </ProtectedRoute>
