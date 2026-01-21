@@ -98,6 +98,7 @@ export const questionExtractionService = {
 
       // Combine latex content from source items
       const combinedContent = await this.combineLatexContent(questionSet.source_item_ids);
+      console.log(`[EXTRACT] Combined LaTeX content size: ${Math.round(combinedContent.length / 1024)}KB`);
 
       // Submit to LlamaParse
       const jobId = await this.submitToLlamaParse(combinedContent);
@@ -110,9 +111,14 @@ export const questionExtractionService = {
 
       // Poll for completion
       const rawResult = await this.pollForCompletion(jobId);
+      console.log(`[EXTRACT] LlamaParse raw result size: ${Math.round(rawResult.length / 1024)}KB`);
+      console.log(`[EXTRACT] Raw result preview (first 500 chars): ${rawResult.substring(0, 500)}`);
 
       // Parse the result into MCQ format
       const questions = this.parseQuestionsFromContent(rawResult);
+      const questionsJson = JSON.stringify(questions);
+      console.log(`[EXTRACT] Parsed questions count: ${questions.questions?.length || 0}`);
+      console.log(`[EXTRACT] Questions JSON size: ${Math.round(questionsJson.length / 1024)}KB`);
 
       // Update question set with results
       const { data, error } = await supabase
@@ -126,6 +132,10 @@ export const questionExtractionService = {
         .eq('id', questionSetId)
         .select()
         .single();
+
+      if (data) {
+        console.log(`[EXTRACT] Saved to DB. Returned questions count: ${data.questions?.questions?.length || 0}`);
+      }
 
       if (error) throw error;
       return data;
@@ -145,10 +155,12 @@ export const questionExtractionService = {
     // Fetch items
     const { data: items, error } = await supabase
       .from('scanned_items')
-      .select('id, latex_doc')
+      .select('id, latex_doc, latex_conversion_status')
       .in('id', itemIds);
 
     if (error) throw error;
+
+    console.log(`[EXTRACT] Source items: ${items.length} items for ${itemIds.length} IDs`);
 
     // Create a map for quick lookup
     const itemMap = new Map(items.map((item) => [item.id, item.latex_doc]));
@@ -156,6 +168,7 @@ export const questionExtractionService = {
     // Combine in the order of itemIds
     const combinedParts = itemIds.map((id, index) => {
       const latex = itemMap.get(id) || '';
+      console.log(`[EXTRACT] Item ${index + 1} (${id}): ${latex ? Math.round(latex.length / 1024) + 'KB' : 'EMPTY/NULL'}`);
       return `% ========== Document ${index + 1} ==========\n\n${latex}`;
     });
 
@@ -176,7 +189,6 @@ export const questionExtractionService = {
     formData.append('parsing_instruction', MCQ_PARSING_INSTRUCTIONS);
     formData.append('result_type', 'markdown');
     formData.append('premium_mode', 'true');
-    formData.append('gpt4o_mode', 'true');
 
     const response = await fetch(`${LLAMAPARSE_API_URL}/upload`, {
       method: 'POST',
@@ -259,10 +271,57 @@ export const questionExtractionService = {
    */
   parseQuestionsFromContent(rawContent) {
     try {
-      // Try to find JSON in the response
-      const jsonMatch = rawContent.match(/\{[\s\S]*"questions"[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+      // Find ALL JSON objects with "questions" arrays and merge them
+      const allQuestions = [];
+      let searchStart = 0;
+
+      while (true) {
+        // Find next JSON object with questions
+        let jsonStart = rawContent.indexOf('{"questions"', searchStart);
+
+        // Also try with whitespace variations
+        if (jsonStart === -1) {
+          const match = rawContent.substring(searchStart).match(/\{\s*"questions"\s*:\s*\[/);
+          if (match) {
+            jsonStart = searchStart + rawContent.substring(searchStart).indexOf(match[0]);
+          }
+        }
+
+        if (jsonStart === -1) break;
+
+        // Find matching closing brace
+        let braceCount = 0;
+        let jsonEnd = -1;
+
+        for (let i = jsonStart; i < rawContent.length; i++) {
+          if (rawContent[i] === '{') braceCount++;
+          if (rawContent[i] === '}') braceCount--;
+          if (braceCount === 0) {
+            jsonEnd = i + 1;
+            break;
+          }
+        }
+
+        if (jsonEnd !== -1) {
+          const jsonStr = rawContent.substring(jsonStart, jsonEnd);
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.questions && Array.isArray(parsed.questions)) {
+              console.log(`[EXTRACT] Found JSON block with ${parsed.questions.length} questions`);
+              allQuestions.push(...parsed.questions);
+            }
+          } catch (parseErr) {
+            console.error(`[EXTRACT] Failed to parse JSON block: ${parseErr.message}`);
+          }
+          searchStart = jsonEnd;
+        } else {
+          break;
+        }
+      }
+
+      if (allQuestions.length > 0) {
+        console.log(`[EXTRACT] Total merged questions: ${allQuestions.length}`);
+        return { questions: allQuestions };
       }
 
       // If no JSON found, try to parse markdown format
