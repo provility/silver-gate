@@ -1,0 +1,212 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { FileQuestion, Trash2, Eye, Filter } from 'lucide-react';
+import QuestionSetModal from '../components/QuestionSetModal';
+
+export default function ExtractedQuestionsPage() {
+  const queryClient = useQueryClient();
+  const [selectedSet, setSelectedSet] = useState(null);
+  const [selectedBookId, setSelectedBookId] = useState('');
+  const [selectedChapterId, setSelectedChapterId] = useState('');
+
+  // Fetch books for dropdown
+  const { data: books } = useQuery({
+    queryKey: ['books'],
+    queryFn: () => api.get('/books'),
+  });
+
+  // Fetch chapters for selected book
+  const { data: chapters } = useQuery({
+    queryKey: ['chapters', selectedBookId],
+    queryFn: () => api.get(`/chapters/book/${selectedBookId}`),
+    enabled: !!selectedBookId,
+  });
+
+  // Fetch question sets with filters
+  const { data: questionSets, isLoading } = useQuery({
+    queryKey: ['questionSets', selectedBookId, selectedChapterId],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (selectedBookId) params.append('bookId', selectedBookId);
+      if (selectedChapterId) params.append('chapterId', selectedChapterId);
+      const queryString = params.toString();
+      return api.get(`/question-sets${queryString ? `?${queryString}` : ''}`);
+    },
+  });
+
+  // Delete question set mutation
+  const deleteSetMutation = useMutation({
+    mutationFn: (id) => api.delete(`/question-sets/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['questionSets'] });
+    },
+  });
+
+  const handleDelete = (e, id, name) => {
+    e.stopPropagation();
+    if (window.confirm(`Are you sure you want to delete "${name}"?`)) {
+      deleteSetMutation.mutate(id);
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    const styles = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      processing: 'bg-blue-100 text-blue-800',
+      completed: 'bg-green-100 text-green-800',
+      failed: 'bg-red-100 text-red-800',
+    };
+    return (
+      <span className={`px-2 py-1 text-xs font-medium rounded-full ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
+        {status}
+      </span>
+    );
+  };
+
+  const sortedSets = questionSets?.data
+    ? [...questionSets.data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    : [];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">Extracted Questions</h1>
+          <p className="text-gray-500 mt-1">View and manage extracted question sets</p>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+        <div className="flex items-center gap-4">
+          <Filter className="w-5 h-5 text-gray-400" />
+          <select
+            value={selectedBookId}
+            onChange={(e) => {
+              setSelectedBookId(e.target.value);
+              setSelectedChapterId('');
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="">All Books</option>
+            {books?.data?.map((book) => (
+              <option key={book.id} value={book.id}>
+                {book.display_name || book.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={selectedChapterId}
+            onChange={(e) => setSelectedChapterId(e.target.value)}
+            disabled={!selectedBookId}
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+          >
+            <option value="">All Chapters</option>
+            {chapters?.data?.map((chapter) => (
+              <option key={chapter.id} value={chapter.id}>
+                {chapter.display_name || chapter.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Question Sets List */}
+      {isLoading ? (
+        <div className="text-center py-12 text-gray-500">Loading question sets...</div>
+      ) : sortedSets.length === 0 ? (
+        <div className="bg-white rounded-lg shadow-sm border p-12 text-center">
+          <FileQuestion className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500">No question sets found</p>
+          <p className="text-gray-400 text-sm mt-1">Extract questions from scanned items to see them here</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Name
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Book / Chapter
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Questions
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Created
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {sortedSets.map((set) => (
+                <tr
+                  key={set.id}
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setSelectedSet(set)}
+                >
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <FileQuestion className="w-5 h-5 text-blue-500 mr-3" />
+                      <span className="text-sm font-medium text-gray-900">{set.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-500">
+                      {set.book?.display_name || '-'}
+                      {set.chapter?.display_name && ` / ${set.chapter.display_name}`}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="text-sm text-gray-900">{set.total_questions || 0}</span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {getStatusBadge(set.status)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {new Date(set.created_at).toLocaleString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedSet(set);
+                      }}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg mr-2"
+                      title="View"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(e, set.id, set.name)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Question Set Modal */}
+      <QuestionSetModal
+        isOpen={!!selectedSet}
+        onClose={() => setSelectedSet(null)}
+        questionSet={selectedSet}
+      />
+    </div>
+  );
+}

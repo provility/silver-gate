@@ -33,11 +33,69 @@ router.get('/:id/pdf', asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, error: 'Scanned item not found' });
   }
 
+  const filename = item.item_data || 'document.pdf';
+  console.log(`[PDF] Fetching PDF for item ${req.params.id}, scan_type: ${item.scan_type}, has content: ${!!item.content}, content type: ${typeof item.content}`);
+
   // If content is stored as binary (BYTEA for email attachments)
+  // Supabase returns BYTEA as base64 string or hex format
   if (item.content) {
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="document.pdf"');
-    return res.send(item.content);
+    try {
+      let pdfBuffer;
+      if (Buffer.isBuffer(item.content)) {
+        pdfBuffer = item.content;
+      } else if (typeof item.content === 'string') {
+        // Check if it's hex format (starts with \x)
+        if (item.content.startsWith('\\x')) {
+          const hexString = item.content.slice(2);
+          const decodedFromHex = Buffer.from(hexString, 'hex');
+
+          // Check if the hex-decoded content is base64-encoded PDF
+          // Base64-encoded PDF starts with "JVBER" (which is "%PDF" in base64)
+          const hexDecodedStr = decodedFromHex.toString('utf8');
+          if (hexDecodedStr.startsWith('JVBER')) {
+            console.log(`[PDF] Detected double-encoding: hex -> base64. Decoding base64...`);
+            pdfBuffer = Buffer.from(hexDecodedStr, 'base64');
+          } else {
+            // Direct hex to binary
+            pdfBuffer = decodedFromHex;
+          }
+        } else if (item.content.startsWith('JVBER')) {
+          // Direct base64-encoded PDF (starts with "JVBER" = "%PDF" in base64)
+          console.log(`[PDF] Detected base64-encoded PDF`);
+          pdfBuffer = Buffer.from(item.content, 'base64');
+        } else {
+          // Supabase returns BYTEA as base64 string
+          pdfBuffer = Buffer.from(item.content, 'base64');
+        }
+      } else if (item.content instanceof Uint8Array) {
+        pdfBuffer = Buffer.from(item.content);
+      } else if (typeof item.content === 'object' && item.content.type === 'Buffer' && Array.isArray(item.content.data)) {
+        // Handle JSON-serialized Buffer: {type: "Buffer", data: [...]}
+        console.log(`[PDF] Handling JSON-serialized Buffer format`);
+        pdfBuffer = Buffer.from(item.content.data);
+      } else {
+        throw new Error(`Unknown content format: ${typeof item.content}`);
+      }
+
+      // Verify it looks like a PDF (starts with %PDF)
+      const header = pdfBuffer.slice(0, 4).toString('utf8');
+      console.log(`[PDF] Buffer size: ${pdfBuffer.length}, header: "${header}"`);
+
+      if (header !== '%PDF') {
+        console.error(`[PDF] Invalid PDF header: "${header}" (expected "%PDF"). First 20 bytes: ${pdfBuffer.slice(0, 20).toString('hex')}`);
+        return res.status(400).json({
+          success: false,
+          error: `Invalid PDF structure. The file does not appear to be a valid PDF (header: "${header}").`
+        });
+      }
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      return res.send(pdfBuffer);
+    } catch (error) {
+      console.error(`[PDF] Error decoding content:`, error);
+      return res.status(400).json({ success: false, error: `Failed to decode PDF content: ${error.message}` });
+    }
   }
 
   // If item_data is a URL, redirect to it
@@ -55,7 +113,7 @@ router.get('/:id/pdf', asyncHandler(async (req, res) => {
       }
       const pdfBuffer = Buffer.from(base64Data, 'base64');
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'inline; filename="document.pdf"');
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
       return res.send(pdfBuffer);
     } catch (error) {
       return res.status(400).json({ success: false, error: 'Invalid PDF data format' });

@@ -5,12 +5,14 @@ import { logger } from '../utils/logger.js';
 
 export const scannedItemService = {
   async getAll(filters = {}) {
+    console.log('[ScannedItems] getAll filters:', filters);
+
     let query = supabase
       .from('scanned_items')
       .select(`
         *,
-        book:books!scanned_items_book_id_fkey(id, name, display_name),
-        chapter:chapters!scanned_items_chapter_id_fkey(id, name, display_name, chapter_number)
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number)
       `)
       .order('created_at', { ascending: false });
 
@@ -26,6 +28,8 @@ export const scannedItemService = {
 
     const { data, error } = await query;
 
+    console.log('[ScannedItems] Query result:', { count: data?.length, error: error?.message });
+
     if (error) throw error;
     return data;
   },
@@ -35,8 +39,8 @@ export const scannedItemService = {
       .from('scanned_items')
       .select(`
         *,
-        book:books!scanned_items_book_id_fkey(id, name, display_name),
-        chapter:chapters!scanned_items_chapter_id_fkey(id, name, display_name, chapter_number)
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number)
       `)
       .eq('id', id)
       .single();
@@ -68,8 +72,8 @@ export const scannedItemService = {
       })
       .select(`
         *,
-        book:books!scanned_items_book_id_fkey(id, name, display_name),
-        chapter:chapters!scanned_items_chapter_id_fkey(id, name, display_name, chapter_number)
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number)
       `)
       .single();
 
@@ -125,8 +129,8 @@ export const scannedItemService = {
       })
       .select(`
         *,
-        book:books!scanned_items_book_id_fkey(id, name, display_name),
-        chapter:chapters!scanned_items_chapter_id_fkey(id, name, display_name, chapter_number)
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number)
       `)
       .single();
 
@@ -151,8 +155,8 @@ export const scannedItemService = {
       .eq('id', id)
       .select(`
         *,
-        book:books!scanned_items_book_id_fkey(id, name, display_name),
-        chapter:chapters!scanned_items_chapter_id_fkey(id, name, display_name, chapter_number)
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number)
       `)
       .single();
 

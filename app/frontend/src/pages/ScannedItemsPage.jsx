@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye } from 'lucide-react';
+import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye, FileText } from 'lucide-react';
 import PDFViewerModal from '../components/PDFViewerModal';
 
 export default function ScannedItemsPage() {
@@ -90,6 +90,16 @@ export default function ScannedItemsPage() {
     },
   });
 
+  // Extract solutions mutation
+  const extractSolutionsMutation = useMutation({
+    mutationFn: (data) => api.post('/solution-sets/extract', data),
+    onSuccess: (result) => {
+      clearSelections();
+      queryClient.invalidateQueries({ queryKey: ['solutionSets'] });
+      alert(`Extraction started! Solution set ID: ${result.data.id}\nStatus: ${result.data.status}`);
+    },
+  });
+
   const handleAddItem = () => {
     if (newItemData.trim()) {
       addItemMutation.mutate({
@@ -139,6 +149,14 @@ export default function ScannedItemsPage() {
     });
   };
 
+  const handleExtractSolutions = () => {
+    const orderedIds = getOrderedItemIds();
+    extractSolutionsMutation.mutate({
+      item_ids: orderedIds,
+      name: `Solution Extraction ${new Date().toLocaleString()}`,
+    });
+  };
+
   const canSelect = (item) => {
     return item.latex_conversion_status === 'completed' && item.latex_doc;
   };
@@ -146,8 +164,10 @@ export default function ScannedItemsPage() {
   // Check if item can be viewed as PDF
   const canViewPdf = (item) => {
     const scanType = item.scan_type?.toLowerCase();
+    const itemData = item.item_data?.toLowerCase() || '';
+    // Allow viewing if scan_type is pdf/email_attachment, or if filename ends with .pdf
     return scanType === 'pdf' || scanType === 'email_attachment' ||
-           (scanType === 'url' && item.item_data?.toLowerCase().endsWith('.pdf'));
+           itemData.endsWith('.pdf') || item.content;
   };
 
   // Get the PDF URL for viewing
@@ -291,13 +311,13 @@ export default function ScannedItemsPage() {
 
       {/* Selection Action Bar */}
       {selectedItems.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center justify-between">
+        <div className={`${activeTab === 'solution' ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'} border rounded-lg p-4 mb-6 flex items-center justify-between`}>
           <div className="flex items-center">
-            <CheckSquare className="w-5 h-5 text-blue-600 mr-2" />
-            <span className="text-blue-800 font-medium">
+            <CheckSquare className={`w-5 h-5 ${activeTab === 'solution' ? 'text-purple-600' : 'text-blue-600'} mr-2`} />
+            <span className={`${activeTab === 'solution' ? 'text-purple-800' : 'text-blue-800'} font-medium`}>
               {selectedItems.length} item{selectedItems.length > 1 ? 's' : ''} selected
             </span>
-            <span className="text-blue-600 text-sm ml-2">
+            <span className={`${activeTab === 'solution' ? 'text-purple-600' : 'text-blue-600'} text-sm ml-2`}>
               (in order: {getOrderedItemIds().map((_, i) => i + 1).join(', ')})
             </span>
           </div>
@@ -308,14 +328,25 @@ export default function ScannedItemsPage() {
             >
               Clear Selection
             </button>
-            <button
-              onClick={handleExtractQuestions}
-              disabled={extractQuestionsMutation.isPending}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              <FileQuestion className="w-5 h-5 mr-2" />
-              {extractQuestionsMutation.isPending ? 'Extracting...' : 'Extract Questions'}
-            </button>
+            {activeTab === 'question' ? (
+              <button
+                onClick={handleExtractQuestions}
+                disabled={extractQuestionsMutation.isPending}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                <FileQuestion className="w-5 h-5 mr-2" />
+                {extractQuestionsMutation.isPending ? 'Extracting...' : 'Extract Questions'}
+              </button>
+            ) : (
+              <button
+                onClick={handleExtractSolutions}
+                disabled={extractSolutionsMutation.isPending}
+                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
+                <CheckCircle className="w-5 h-5 mr-2" />
+                {extractSolutionsMutation.isPending ? 'Extracting...' : 'Extract Solutions'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -324,7 +355,14 @@ export default function ScannedItemsPage() {
       {extractQuestionsMutation.isError && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
           <p className="text-red-800">
-            Extraction failed: {extractQuestionsMutation.error.message}
+            Question extraction failed: {extractQuestionsMutation.error.message}
+          </p>
+        </div>
+      )}
+      {extractSolutionsMutation.isError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-red-800">
+            Solution extraction failed: {extractSolutionsMutation.error.message}
           </p>
         </div>
       )}
@@ -392,7 +430,7 @@ export default function ScannedItemsPage() {
                 return (
                   <tr
                     key={item.id}
-                    className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}
+                    className={`hover:bg-gray-50 ${isSelected ? (activeTab === 'solution' ? 'bg-purple-50' : 'bg-blue-50') : ''}`}
                   >
                     {/* Selection Checkbox */}
                     <td className="px-4 py-4">
@@ -402,11 +440,11 @@ export default function ScannedItemsPage() {
                           checked={isSelected}
                           onChange={() => handleItemSelect(item.id)}
                           disabled={!selectable}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className={`w-4 h-4 rounded disabled:opacity-50 disabled:cursor-not-allowed ${activeTab === 'solution' ? 'text-purple-600 focus:ring-purple-500' : 'text-blue-600 focus:ring-blue-500'}`}
                           title={!selectable ? 'LaTeX conversion not completed' : ''}
                         />
                         {selectionOrder && (
-                          <span className="ml-2 text-xs bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center font-medium">
+                          <span className={`ml-2 text-xs text-white rounded-full w-5 h-5 flex items-center justify-center font-medium ${activeTab === 'solution' ? 'bg-purple-600' : 'bg-blue-600'}`}>
                             {selectionOrder}
                           </span>
                         )}
@@ -416,10 +454,11 @@ export default function ScannedItemsPage() {
                       {canViewPdf(item) ? (
                         <button
                           onClick={() => handleViewPdf(item)}
-                          className="text-blue-600 hover:text-blue-800 hover:underline max-w-xs truncate text-left"
-                          title={item.item_data}
+                          className="flex items-center gap-2 text-blue-600 hover:text-blue-800 hover:underline max-w-xs text-left group"
+                          title={`Click to view: ${item.item_data}`}
                         >
-                          {item.item_data}
+                          <FileText className="w-4 h-4 flex-shrink-0 group-hover:scale-110 transition-transform" />
+                          <span className="truncate">{item.item_data}</span>
                         </button>
                       ) : (
                         <p className="text-gray-800 max-w-xs truncate" title={item.item_data}>
@@ -460,15 +499,13 @@ export default function ScannedItemsPage() {
                     </td>
                     <td className="px-4 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {canViewPdf(item) && (
-                          <button
-                            onClick={() => handleViewPdf(item)}
-                            className="text-blue-600 hover:text-blue-800"
-                            title="View PDF"
-                          >
-                            <Eye className="w-5 h-5" />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleViewPdf(item)}
+                          className="text-blue-600 hover:text-blue-800"
+                          title="View attachment"
+                        >
+                          <Eye className="w-5 h-5" />
+                        </button>
                         <button
                           onClick={() => deleteItemMutation.mutate(item.id)}
                           className="text-red-600 hover:text-red-800"

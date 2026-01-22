@@ -18,7 +18,9 @@ import {
   Pencil,
   ChevronRight,
   ChevronDown,
+  Eye,
 } from 'lucide-react';
+import PDFViewerModal from '../components/PDFViewerModal';
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState('job');
@@ -475,6 +477,10 @@ function ScannedItemsTab() {
   const [selectedItems, setSelectedItems] = useState([]);
   const [selectionCounter, setSelectionCounter] = useState(0);
 
+  // PDF viewer state
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
+  const [selectedPdfItem, setSelectedPdfItem] = useState(null);
+
   const { data: books } = useQuery({ queryKey: ['books'], queryFn: () => api.get('/books') });
   const { data: chapters } = useQuery({
     queryKey: ['chapters', selectedBookId],
@@ -504,9 +510,14 @@ function ScannedItemsTab() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['scannedItems'] }),
   });
 
-  const extractMutation = useMutation({
+  const extractQuestionsMutation = useMutation({
     mutationFn: (data) => api.post('/question-sets/extract', data),
     onSuccess: () => { clearSelections(); queryClient.invalidateQueries({ queryKey: ['questionSets'] }); },
+  });
+
+  const extractSolutionsMutation = useMutation({
+    mutationFn: (data) => api.post('/solution-sets/extract', data),
+    onSuccess: () => { clearSelections(); queryClient.invalidateQueries({ queryKey: ['solutionSets'] }); },
   });
 
   const handleItemSelect = (itemId) => {
@@ -524,6 +535,19 @@ function ScannedItemsTab() {
   const getOrderedIds = () => [...selectedItems].sort((a, b) => a.order - b.order).map((i) => i.id);
   const canSelect = (item) => item.latex_conversion_status === 'completed' && item.latex_doc;
   const hasActiveJob = activeJob?.data?.active_book_id && activeJob?.data?.active_chapter_id;
+
+  // PDF viewing functions
+  const getPdfUrl = (item) => {
+    if (item.scan_type === 'email_attachment' || !item.item_data?.startsWith('http')) {
+      return `/api/scanned-items/${item.id}/pdf`;
+    }
+    return item.item_data;
+  };
+
+  const handleViewPdf = (item) => {
+    setSelectedPdfItem(item);
+    setPdfViewerOpen(true);
+  };
 
   const sortedItems = scannedItems?.data ? [...scannedItems.data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
 
@@ -576,14 +600,21 @@ function ScannedItemsTab() {
 
       {/* Selection Bar */}
       {selectedItems.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex items-center justify-between">
-          <span className="text-blue-800 text-sm">{selectedItems.length} item(s) selected</span>
+        <div className={`${itemTypeFilter === 'solution' ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'} border rounded-lg p-3 mb-4 flex items-center justify-between`}>
+          <span className={`${itemTypeFilter === 'solution' ? 'text-purple-800' : 'text-blue-800'} text-sm`}>{selectedItems.length} item(s) selected</span>
           <div className="flex gap-2">
             <button onClick={clearSelections} className="text-sm text-gray-600">Clear</button>
-            <button onClick={() => extractMutation.mutate({ item_ids: getOrderedIds(), name: `Extraction ${new Date().toLocaleString()}` })}
-              disabled={extractMutation.isPending} className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg">
-              {extractMutation.isPending ? 'Extracting...' : 'Extract Questions'}
-            </button>
+            {itemTypeFilter === 'question' ? (
+              <button onClick={() => extractQuestionsMutation.mutate({ item_ids: getOrderedIds(), name: `Extraction ${new Date().toLocaleString()}` })}
+                disabled={extractQuestionsMutation.isPending} className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50">
+                {extractQuestionsMutation.isPending ? 'Extracting...' : 'Extract Questions'}
+              </button>
+            ) : (
+              <button onClick={() => extractSolutionsMutation.mutate({ item_ids: getOrderedIds(), name: `Solution Extraction ${new Date().toLocaleString()}` })}
+                disabled={extractSolutionsMutation.isPending} className="px-3 py-1 bg-purple-600 text-white text-sm rounded-lg disabled:opacity-50">
+                {extractSolutionsMutation.isPending ? 'Extracting...' : 'Extract Solutions'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -620,15 +651,24 @@ function ScannedItemsTab() {
                 const order = getSelectionOrder(item.id);
                 const selectable = canSelect(item);
                 return (
-                  <tr key={item.id} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
+                  <tr key={item.id} className={`hover:bg-gray-50 ${isSelected ? (itemTypeFilter === 'solution' ? 'bg-purple-50' : 'bg-blue-50') : ''}`}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         <input type="checkbox" checked={isSelected} onChange={() => handleItemSelect(item.id)}
-                          disabled={!selectable} className="w-4 h-4 rounded disabled:opacity-50" />
-                        {order && <span className="text-xs bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center">{order}</span>}
+                          disabled={!selectable} className={`w-4 h-4 rounded disabled:opacity-50 ${itemTypeFilter === 'solution' ? 'text-purple-600' : 'text-blue-600'}`} />
+                        {order && <span className={`text-xs text-white rounded-full w-5 h-5 flex items-center justify-center ${itemTypeFilter === 'solution' ? 'bg-purple-600' : 'bg-blue-600'}`}>{order}</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 max-w-xs truncate">{item.item_data}</td>
+                    <td className="px-4 py-3 max-w-xs">
+                      <button
+                        onClick={() => handleViewPdf(item)}
+                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800 hover:underline text-left truncate"
+                        title={`Click to view: ${item.item_data}`}
+                      >
+                        <FileText className="w-4 h-4 flex-shrink-0" />
+                        <span className="truncate">{item.item_data}</span>
+                      </button>
+                    </td>
                     <td className="px-4 py-3">
                       <p className="text-gray-800">{item.book?.display_name || item.book?.name}</p>
                       <p className="text-xs text-gray-500">{item.chapter?.display_name || item.chapter?.name}</p>
@@ -640,11 +680,16 @@ function ScannedItemsTab() {
                         item.latex_conversion_status === 'processing' ? 'bg-blue-100 text-blue-600' : 'bg-yellow-100 text-yellow-600'
                       }`}>{item.latex_conversion_status || 'pending'}</span>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{new Date(item.created_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-gray-500">{new Date(item.created_at).toLocaleString()}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => deleteMutation.mutate(item.id)} className="text-red-500 hover:text-red-700">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleViewPdf(item)} className="text-blue-500 hover:text-blue-700" title="View attachment">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => deleteMutation.mutate(item.id)} className="text-red-500 hover:text-red-700" title="Delete">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -687,6 +732,17 @@ function ScannedItemsTab() {
           </div>
         </Modal>
       )}
+
+      {/* PDF Viewer Modal */}
+      <PDFViewerModal
+        isOpen={pdfViewerOpen}
+        onClose={() => {
+          setPdfViewerOpen(false);
+          setSelectedPdfItem(null);
+        }}
+        pdfUrl={selectedPdfItem ? getPdfUrl(selectedPdfItem) : null}
+        title={selectedPdfItem?.item_data || 'PDF Document'}
+      />
     </div>
   );
 }

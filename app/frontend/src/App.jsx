@@ -3,6 +3,9 @@ import { useAuthStore } from './stores/authStore';
 import AppShell from './components/AppShell';
 import LoginPage from './pages/LoginPage';
 import HomePage from './pages/HomePage';
+import ScannedItemsPage from './pages/ScannedItemsPage';
+import ExtractedQuestionsPage from './pages/ExtractedQuestionsPage';
+import ExtractedSolutionsPage from './pages/ExtractedSolutionsPage';
 
 function ProtectedRoute({ children }) {
   const { user, isInitialized } = useAuthStore();
@@ -34,6 +37,9 @@ function App() {
               <AppShell>
                 <Routes>
                   <Route path="/" element={<HomePage />} />
+                  <Route path="/scanned-items" element={<ScannedItemsPage />} />
+                  <Route path="/extracted-questions" element={<ExtractedQuestionsPage />} />
+                  <Route path="/extracted-solutions" element={<ExtractedSolutionsPage />} />
                 </Routes>
               </AppShell>
             </ProtectedRoute>

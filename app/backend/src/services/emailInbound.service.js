@@ -289,7 +289,17 @@ export const emailInboundService = {
     logger.info('SCAN', `│ Type: ${activeJob.active_item_type || 'question'}`);
     logger.info('SCAN', `└─────────────────────────────────────────────────`);
 
-    // Insert into scanned_items with BYTEA content
+    // Convert Buffer to base64 for proper BYTEA storage in Supabase
+    // Supabase JS client expects base64 strings for BYTEA columns
+    const base64Content = attachment.content.toString('base64');
+
+    // Verify PDF header before storing
+    const pdfHeader = attachment.content.slice(0, 4).toString('utf8');
+    if (pdfHeader !== '%PDF') {
+      logger.warn('SCAN', `Warning: File "${attachment.filename}" may not be a valid PDF (header: ${pdfHeader})`);
+    }
+
+    // Insert into scanned_items with base64-encoded content
     const { data, error } = await supabase
       .from('scanned_items')
       .insert({
@@ -297,7 +307,7 @@ export const emailInboundService = {
         chapter_id: activeJob.active_chapter_id,
         item_type: activeJob.active_item_type || 'question',
         item_data: attachment.filename, // Store filename in item_data
-        content: attachment.content, // BYTEA - raw PDF binary
+        content: base64Content, // Base64-encoded PDF for BYTEA column
         scan_type: 'email_attachment',
         status: 'pending',
         latex_conversion_status: 'pending',
