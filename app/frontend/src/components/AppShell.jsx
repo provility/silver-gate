@@ -1,12 +1,13 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { Home, LogOut, ScanLine, FileQuestion, CheckCircle } from 'lucide-react';
+import { Home, LogOut, ScanLine, FileQuestion, CheckCircle, FolderOpen } from 'lucide-react';
 
 const navItems = [
   { path: '/', label: 'Home', icon: Home },
   { path: '/scanned-items', label: 'Scanned Items', icon: ScanLine },
   { path: '/extracted-questions', label: 'Extracted Questions', icon: FileQuestion },
   { path: '/extracted-solutions', label: 'Extracted Solutions', icon: CheckCircle },
+  { path: '/lesson-folders', label: 'Lesson Folders', icon: FolderOpen },
 ];
 
 export default function AppShell({ children }) {

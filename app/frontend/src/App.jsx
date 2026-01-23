@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage';
 import ScannedItemsPage from './pages/ScannedItemsPage';
 import ExtractedQuestionsPage from './pages/ExtractedQuestionsPage';
 import ExtractedSolutionsPage from './pages/ExtractedSolutionsPage';
+import LessonFoldersPage from './pages/LessonFoldersPage';
 
 function ProtectedRoute({ children }) {
   const { user, isInitialized } = useAuthStore();
@@ -40,6 +41,7 @@ function App() {
                   <Route path="/scanned-items" element={<ScannedItemsPage />} />
                   <Route path="/extracted-questions" element={<ExtractedQuestionsPage />} />
                   <Route path="/extracted-solutions" element={<ExtractedSolutionsPage />} />
+                  <Route path="/lesson-folders" element={<LessonFoldersPage />} />
                 </Routes>
               </AppShell>
             </ProtectedRoute>

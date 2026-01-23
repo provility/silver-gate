@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { FileQuestion, Trash2, Eye, Filter } from 'lucide-react';
@@ -22,6 +22,22 @@ export default function ExtractedQuestionsPage() {
     queryFn: () => api.get(`/chapters/book/${selectedBookId}`),
     enabled: !!selectedBookId,
   });
+
+  // Fetch active job
+  const { data: activeJob } = useQuery({
+    queryKey: ['activeJob'],
+    queryFn: () => api.get('/jobs/active'),
+  });
+
+  // Set default filters from active job
+  useEffect(() => {
+    if (activeJob?.data?.active_book_id && !selectedBookId) {
+      setSelectedBookId(activeJob.data.active_book_id);
+    }
+    if (activeJob?.data?.active_chapter_id && !selectedChapterId) {
+      setSelectedChapterId(activeJob.data.active_chapter_id);
+    }
+  }, [activeJob?.data?.active_book_id, activeJob?.data?.active_chapter_id]);
 
   // Fetch question sets with filters
   const { data: questionSets, isLoading } = useQuery({

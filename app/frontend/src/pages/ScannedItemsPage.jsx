@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye, FileText, Pencil } from 'lucide-react';
@@ -26,6 +26,10 @@ export default function ScannedItemsPage() {
   // PDF viewer modal state
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [selectedPdfItem, setSelectedPdfItem] = useState(null);
+
+  // LaTeX viewer modal state
+  const [latexViewerOpen, setLatexViewerOpen] = useState(false);
+  const [selectedLatexItem, setSelectedLatexItem] = useState(null);
 
   // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false);
@@ -74,6 +78,16 @@ export default function ScannedItemsPage() {
     queryKey: ['activeJob'],
     queryFn: () => api.get('/jobs/active'),
   });
+
+  // Set default filters from active job
+  useEffect(() => {
+    if (activeJob?.data?.active_book_id && !selectedBookId) {
+      setSelectedBookId(activeJob.data.active_book_id);
+    }
+    if (activeJob?.data?.active_chapter_id && !selectedChapterId) {
+      setSelectedChapterId(activeJob.data.active_chapter_id);
+    }
+  }, [activeJob?.data?.active_book_id, activeJob?.data?.active_chapter_id]);
 
   // Add scanned item mutation
   const addItemMutation = useMutation({
@@ -237,6 +251,11 @@ export default function ScannedItemsPage() {
   const handleViewPdf = (item) => {
     setSelectedPdfItem(item);
     setPdfViewerOpen(true);
+  };
+
+  const handleViewLatex = (item) => {
+    setSelectedLatexItem(item);
+    setLatexViewerOpen(true);
   };
 
   const hasActiveJob = activeJob?.data?.active_book_id && activeJob?.data?.active_chapter_id;
@@ -554,9 +573,10 @@ export default function ScannedItemsPage() {
                     <td className="px-4 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => handleViewPdf(item)}
-                          className="text-blue-600 hover:text-blue-800"
-                          title="View attachment"
+                          onClick={() => handleViewLatex(item)}
+                          className={`${item.latex_doc ? 'text-green-500 hover:text-green-700' : 'text-gray-300 cursor-not-allowed'}`}
+                          title={item.latex_doc ? 'View LaTeX' : 'No LaTeX available'}
+                          disabled={!item.latex_doc}
                         >
                           <Eye className="w-5 h-5" />
                         </button>
@@ -801,6 +821,54 @@ export default function ScannedItemsPage() {
         pdfUrl={selectedPdfItem ? getPdfUrl(selectedPdfItem) : null}
         title={selectedPdfItem?.item_data || 'PDF Document'}
       />
+
+      {/* LaTeX Viewer Modal */}
+      {latexViewerOpen && selectedLatexItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-800">LaTeX Content</h2>
+                <p className="text-sm text-gray-500">{selectedLatexItem.item_data}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setLatexViewerOpen(false);
+                  setSelectedLatexItem(null);
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-auto flex-1">
+              <pre className="bg-gray-50 p-4 rounded-lg text-sm font-mono whitespace-pre-wrap break-words overflow-x-auto">
+                {selectedLatexItem.latex_doc || 'No LaTeX content available'}
+              </pre>
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(selectedLatexItem.latex_doc || '');
+                  alert('LaTeX copied to clipboard!');
+                }}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+              >
+                Copy to Clipboard
+              </button>
+              <button
+                onClick={() => {
+                  setLatexViewerOpen(false);
+                  setSelectedLatexItem(null);
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
