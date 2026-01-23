@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye, FileText } from 'lucide-react';
+import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye, FileText, Pencil } from 'lucide-react';
 import PDFViewerModal from '../components/PDFViewerModal';
 
 export default function ScannedItemsPage() {
@@ -27,6 +27,15 @@ export default function ScannedItemsPage() {
   const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [selectedPdfItem, setSelectedPdfItem] = useState(null);
 
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    item_data: '',
+    book_id: '',
+    chapter_id: '',
+  });
+
   // Fetch books for dropdown
   const { data: books } = useQuery({
     queryKey: ['books'],
@@ -38,6 +47,13 @@ export default function ScannedItemsPage() {
     queryKey: ['chapters', selectedBookId],
     queryFn: () => api.get(`/chapters/book/${selectedBookId}`),
     enabled: !!selectedBookId,
+  });
+
+  // Fetch chapters for edit modal book selection
+  const { data: editChapters } = useQuery({
+    queryKey: ['editChapters', editFormData.book_id],
+    queryFn: () => api.get(`/chapters/book/${editFormData.book_id}`),
+    enabled: !!editFormData.book_id,
   });
 
   // Fetch scanned items with filters
@@ -80,6 +96,21 @@ export default function ScannedItemsPage() {
     },
   });
 
+  // Update scanned item mutation
+  const updateItemMutation = useMutation({
+    mutationFn: ({ id, data }) => api.put(`/scanned-items/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scannedItems'] });
+      setShowEditModal(false);
+      setEditingItem(null);
+      setEditFormData({
+        item_data: '',
+        book_id: '',
+        chapter_id: '',
+      });
+    },
+  });
+
   // Extract questions mutation
   const extractQuestionsMutation = useMutation({
     mutationFn: (data) => api.post('/question-sets/extract', data),
@@ -105,6 +136,29 @@ export default function ScannedItemsPage() {
       addItemMutation.mutate({
         item_data: newItemData,
         scan_type: newScanType,
+      });
+    }
+  };
+
+  const handleEditItem = (item) => {
+    setEditingItem(item);
+    setEditFormData({
+      item_data: item.item_data,
+      book_id: item.book_id,
+      chapter_id: item.chapter_id,
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (editFormData.item_data.trim() && editFormData.book_id && editFormData.chapter_id) {
+      updateItemMutation.mutate({
+        id: editingItem.id,
+        data: {
+          item_data: editFormData.item_data,
+          book_id: parseInt(editFormData.book_id),
+          chapter_id: parseInt(editFormData.chapter_id),
+        },
       });
     }
   };
@@ -507,6 +561,13 @@ export default function ScannedItemsPage() {
                           <Eye className="w-5 h-5" />
                         </button>
                         <button
+                          onClick={() => handleEditItem(item)}
+                          className="text-gray-600 hover:text-gray-800"
+                          title="Edit item"
+                        >
+                          <Pencil className="w-5 h-5" />
+                        </button>
+                        <button
                           onClick={() => deleteItemMutation.mutate(item.id)}
                           className="text-red-600 hover:text-red-800"
                           title="Delete"
@@ -604,6 +665,126 @@ export default function ScannedItemsPage() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {addItemMutation.isPending ? 'Adding...' : 'Add Item'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Item Modal */}
+      {showEditModal && editingItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md">
+            <div className={`flex items-center justify-between p-4 border-b ${
+              activeTab === 'solution' ? 'bg-purple-50' : 'bg-blue-50'
+            }`}>
+              <h2 className={`text-lg font-semibold ${
+                activeTab === 'solution' ? 'text-purple-800' : 'text-blue-800'
+              }`}>
+                Edit Scanned Item
+              </h2>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  PDF Name / Item Data
+                </label>
+                <input
+                  type="text"
+                  value={editFormData.item_data}
+                  onChange={(e) => setEditFormData({ ...editFormData, item_data: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter PDF name or URL..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Book
+                </label>
+                <select
+                  value={editFormData.book_id}
+                  onChange={(e) => {
+                    setEditFormData({
+                      ...editFormData,
+                      book_id: e.target.value,
+                      chapter_id: '', // Reset chapter when book changes
+                    });
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">Select a book</option>
+                  {books?.data?.map((book) => (
+                    <option key={book.id} value={book.id}>
+                      {book.display_name || book.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Chapter
+                </label>
+                <select
+                  value={editFormData.chapter_id}
+                  onChange={(e) => setEditFormData({ ...editFormData, chapter_id: e.target.value })}
+                  disabled={!editFormData.book_id}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  <option value="">Select a chapter</option>
+                  {editChapters?.data?.map((chapter) => (
+                    <option key={chapter.id} value={chapter.id}>
+                      {chapter.chapter_number ? `Ch ${chapter.chapter_number}: ` : ''}
+                      {chapter.display_name || chapter.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <p className="text-sm text-gray-600">
+                  <span className="font-medium">Current Type:</span>{' '}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                    activeTab === 'solution'
+                      ? 'bg-purple-100 text-purple-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {activeTab === 'solution' ? 'Solution' : 'Question'}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-4 border-t">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={
+                  !editFormData.item_data.trim() ||
+                  !editFormData.book_id ||
+                  !editFormData.chapter_id ||
+                  updateItemMutation.isPending
+                }
+                className={`px-4 py-2 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed ${
+                  activeTab === 'solution'
+                    ? 'bg-purple-600 hover:bg-purple-700'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {updateItemMutation.isPending ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
