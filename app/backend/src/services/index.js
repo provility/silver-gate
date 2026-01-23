@@ -8,3 +8,4 @@ export { questionExtractionService } from './questionExtraction.service.js';
 export { solutionExtractionService } from './solutionExtraction.service.js';
 export { emailInboundService } from './emailInbound.service.js';
 export { googleDriveService } from './googleDrive.service.js';
+export { lessonsService } from './lessons.service.js';
