@@ -182,7 +182,7 @@ export const lessonsService = {
    *
    * range_configs format: [{ start: 1, end: 20, lesson_name: 'Lesson 1', parent_section_name: 'Section A', common_parent_section_name: 'Algebra' }, ...]
    */
-  async create({ name, common_parent_section_name, parent_section_name, lesson_item_count, range_configs, question_set_id, solution_set_id, items: providedItems }) {
+  async create({ name, common_parent_section_name, parent_section_name, lesson_item_count, range_configs, question_set_id, solution_set_id, items: providedItems, question_type = 'OTHER' }) {
     // Fetch question set
     const questionSet = await questionExtractionService.findById(question_set_id);
     if (!questionSet) {
@@ -325,7 +325,9 @@ export const lessonsService = {
     // lessonCommonParentSectionName and lessonParentSectionName are optional overrides for manual range mode
     // questionRange is the string representation of the range (e.g., "1 - 10")
     // display_orderValue is the display_order of this lesson within its chapter
-    const createSingleLesson = async (lessonName, lessonItems, lessonCommonParentSectionName = null, lessonParentSectionName = null, questionRange = null, display_orderValue = null) => {
+    // lessonQuestionType is the question type for all items in this lesson (defaults to global question_type)
+    const createSingleLesson = async (lessonName, lessonItems, lessonCommonParentSectionName = null, lessonParentSectionName = null, questionRange = null, display_orderValue = null, lessonQuestionType = null) => {
+      console.log('createSingleLesson called with lessonQuestionType:', lessonQuestionType, 'global question_type:', question_type);
       // Generate toc_output_json from lesson items
       const tocQuestionItems = lessonItems.map((item, index) => {
         const questionId = String(index + 1);
@@ -398,10 +400,12 @@ export const lessonsService = {
           question_solution_item_json: item,
           position: index,
           ref_id: generateMongoId(),
+          question_type: lessonQuestionType || question_type,
         };
       });
 
       if (lessonItemRecords.length > 0) {
+        console.log('Inserting lesson items with question_type:', lessonItemRecords[0]?.question_type);
         const { error: itemsError } = await supabase
           .from('lesson_items')
           .insert(lessonItemRecords);
@@ -425,13 +429,16 @@ export const lessonsService = {
       const createdLessonIds = [];
 
       for (const config of range_configs) {
+        console.log('Range config received:', JSON.stringify(config, null, 2));
         const {
           start,
           end,
           lesson_name: rangeLessonName,
           parent_section_name: rangeParentSectionName,
-          common_parent_section_name: rangeCommonParentSectionName
+          common_parent_section_name: rangeCommonParentSectionName,
+          question_type: rangeQuestionType
         } = config;
+        console.log('Extracted rangeQuestionType:', rangeQuestionType);
 
         // Validate lesson_name is provided
         if (!rangeLessonName || !rangeLessonName.trim()) {
@@ -456,7 +463,8 @@ export const lessonsService = {
           rangeCommonParentSectionName || null,
           rangeParentSectionName || null,
           questionRange,
-          currentOrder
+          currentOrder,
+          rangeQuestionType || 'OTHER'
         );
         createdLessonIds.push(lessonId);
         currentOrder++; // Increment display_order for next lesson

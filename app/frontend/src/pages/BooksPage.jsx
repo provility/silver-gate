@@ -128,6 +128,7 @@ export default function BooksPage() {
           name: editingBook.name,
           display_name: editingBook.display_name,
           description: editingBook.description,
+          ref_id: editingBook.ref_id || null,
         },
       });
     }
@@ -141,6 +142,7 @@ export default function BooksPage() {
           name: editingChapter.name,
           display_name: editingChapter.display_name,
           chapter_number: editingChapter.chapter_number ? parseInt(editingChapter.chapter_number, 10) : null,
+          ref_id: editingChapter.ref_id || null,
         },
       });
     }
@@ -533,6 +535,21 @@ export default function BooksPage() {
                   placeholder="Optional description"
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ref ID (MongoDB)
+                </label>
+                <input
+                  type="text"
+                  value={editingBook.ref_id || ''}
+                  onChange={(e) => setEditingBook({ ...editingBook, ref_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="24-character hex string"
+                  maxLength={24}
+                />
+                <p className="text-xs text-gray-500 mt-1">MongoDB ObjectId for sync</p>
+              </div>
             </div>
 
             <div className="flex justify-end gap-3 p-4 border-t">
@@ -606,6 +623,21 @@ export default function BooksPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="e.g., Algebra Basics"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ref ID (MongoDB)
+                </label>
+                <input
+                  type="text"
+                  value={editingChapter.ref_id || ''}
+                  onChange={(e) => setEditingChapter({ ...editingChapter, ref_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="24-character hex string"
+                  maxLength={24}
+                />
+                <p className="text-xs text-gray-500 mt-1">MongoDB ObjectId for sync</p>
               </div>
             </div>
 

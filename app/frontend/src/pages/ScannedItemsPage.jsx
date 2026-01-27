@@ -138,12 +138,21 @@ export default function ScannedItemsPage() {
   // Delete scanned item mutation
   const deleteItemMutation = useMutation({
     mutationFn: (id) => api.delete(`/scanned-items/${id}`),
-    onSuccess: () => {
+    onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['scannedItems'] });
       // Remove from selection if deleted
-      setSelectedItems((prev) => prev.filter((item) => item.id !== id));
+      setSelectedItems((prev) => prev.filter((item) => item.id !== deletedId));
+    },
+    onError: (error) => {
+      alert(`Failed to delete item: ${error.message}`);
     },
   });
+
+  const handleDeleteItem = (item) => {
+    if (window.confirm(`Are you sure you want to delete "${item.item_data}"?`)) {
+      deleteItemMutation.mutate(item.id);
+    }
+  };
 
   // Update scanned item mutation
   const updateItemMutation = useMutation({
@@ -674,8 +683,9 @@ export default function ScannedItemsPage() {
                           <Pencil className="w-5 h-5" />
                         </button>
                         <button
-                          onClick={() => deleteItemMutation.mutate(item.id)}
-                          className="text-red-600 hover:text-red-800"
+                          onClick={() => handleDeleteItem(item)}
+                          disabled={deleteItemMutation.isPending}
+                          className="text-red-600 hover:text-red-800 disabled:opacity-50"
                           title="Delete"
                         >
                           <Trash2 className="w-5 h-5" />

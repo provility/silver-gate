@@ -279,8 +279,11 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
   // Manual range mode state
   const [splitMode, setSplitMode] = useState('auto'); // 'auto' | 'manual'
   const [rangeConfigs, setRangeConfigs] = useState([
-    { start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }
+    { start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '', question_type: 'OTHER' }
   ]);
+
+  // Question type state (for Auto Split mode)
+  const [questionType, setQuestionType] = useState('OTHER');
 
   // Fetch books
   const { data: books } = useQuery({
@@ -327,7 +330,8 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
       setParentSectionName('');
       setLessonItemCount('');
       setSplitMode('auto');
-      setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
+      setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '', question_type: 'OTHER' }]);
+      setQuestionType('OTHER');
     }
   }, [isOpen]);
 
@@ -389,7 +393,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
       setEditingItemIndex(null);
       // Reset range configs with total items available
       const totalItems = response.data.items?.length || 0;
-      setRangeConfigs([{ start: 1, end: totalItems, lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
+      setRangeConfigs([{ start: 1, end: totalItems, lesson_name: '', parent_section_name: '', common_parent_section_name: '', question_type: 'OTHER' }]);
     },
   });
 
@@ -400,6 +404,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
         question_set_id: selectedQuestionSetId,
         solution_set_id: selectedSolutionSetId,
         items: editedItems,
+        question_type: questionType,
       };
 
       if (splitMode === 'auto') {
@@ -408,14 +413,17 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
         payload.parent_section_name = parentSectionName.trim() || null;
         payload.lesson_item_count = lessonItemCount ? parseInt(lessonItemCount, 10) : null;
       } else {
-        // Manual mode - send range_configs with lesson_name per range
+        // Manual mode - send range_configs with lesson_name and question_type per range
         payload.range_configs = rangeConfigs.map(config => ({
           start: parseInt(config.start, 10),
           end: parseInt(config.end, 10),
           lesson_name: config.lesson_name.trim(),
           parent_section_name: config.parent_section_name.trim() || null,
           common_parent_section_name: config.common_parent_section_name.trim() || null,
+          question_type: config.question_type || 'OTHER',
         }));
+        // Remove global question_type for manual mode since it's per-range
+        delete payload.question_type;
       }
 
       return api.post('/lessons', payload);
@@ -471,7 +479,8 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
     setParentSectionName('');
     setLessonItemCount('');
     setSplitMode('auto');
-    setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
+    setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '', question_type: 'OTHER' }]);
+    setQuestionType('OTHER');
     prepareLessonMutation.reset();
     createLessonMutation.reset();
     onClose();
@@ -487,7 +496,8 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
     setParentSectionName('');
     setLessonItemCount('');
     setSplitMode('auto');
-    setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
+    setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '', question_type: 'OTHER' }]);
+    setQuestionType('OTHER');
     prepareLessonMutation.reset();
   };
 
@@ -545,7 +555,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
     setRangeConfigs(prev => {
       const lastRange = prev[prev.length - 1];
       const newStart = lastRange?.end ? parseInt(lastRange.end, 10) + 1 : 1;
-      return [...prev, { start: newStart, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }];
+      return [...prev, { start: newStart, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '', question_type: 'OTHER' }];
     });
   }, []);
 
@@ -716,7 +726,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
           {/* Footer - Create Lesson Form */}
           <div className="p-4 border-t bg-gray-50">
             <form onSubmit={handleCreateLesson} className="space-y-4">
-              {/* Lesson Name - Only shown in Auto Split mode */}
+              {/* Lesson Name and Question Type Row - Only shown in Auto Split mode */}
               {splitMode === 'auto' && (
                 <div className="flex items-end gap-4">
                   <div className="flex-1">
@@ -731,6 +741,21 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                       required
                     />
+                  </div>
+                  <div className="w-40">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Question Type
+                    </label>
+                    <select
+                      value={questionType}
+                      onChange={(e) => setQuestionType(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="CHOICE_BASED">Choice Based</option>
+                      <option value="PROOF_BASED">Proof Based</option>
+                      <option value="MULTI_QUESTIONS">Multi Questions</option>
+                      <option value="OTHER">Other</option>
+                    </select>
                   </div>
                 </div>
               )}
@@ -827,7 +852,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {rangeConfigs.map((config, index) => (
                       <div key={index} className="p-3 bg-white rounded-lg border space-y-2">
-                        {/* Row 1: Lesson Name */}
+                        {/* Row 1: Lesson Name and Question Type */}
                         <div className="flex items-center gap-2">
                           <div className="flex-1">
                             <label className="block text-xs text-gray-500 mb-1">Lesson Name *</label>
@@ -838,6 +863,19 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
                               placeholder="e.g., Chapter 3 Problems"
                               className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
                             />
+                          </div>
+                          <div className="w-36">
+                            <label className="block text-xs text-gray-500 mb-1">Question Type</label>
+                            <select
+                              value={config.question_type || 'OTHER'}
+                              onChange={(e) => handleRangeConfigChange(index, 'question_type', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
+                            >
+                              <option value="CHOICE_BASED">Choice Based</option>
+                              <option value="PROOF_BASED">Proof Based</option>
+                              <option value="MULTI_QUESTIONS">Multi Questions</option>
+                              <option value="OTHER">Other</option>
+                            </select>
                           </div>
                           <button
                             type="button"

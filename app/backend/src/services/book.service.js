@@ -41,13 +41,20 @@ export const bookService = {
   },
 
   async update(id, bookData) {
+    const updateFields = {
+      name: bookData.name,
+      display_name: bookData.display_name,
+      description: bookData.description,
+    };
+
+    // Only update ref_id if provided
+    if (bookData.ref_id !== undefined) {
+      updateFields.ref_id = bookData.ref_id;
+    }
+
     const { data, error } = await supabase
       .from('books')
-      .update({
-        name: bookData.name,
-        display_name: bookData.display_name,
-        description: bookData.description,
-      })
+      .update(updateFields)
       .eq('id', id)
       .select()
       .single();

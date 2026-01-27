@@ -57,7 +57,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // Create a new lesson (or multiple lessons if lesson_item_count or range_configs is provided)
 router.post('/', asyncHandler(async (req, res) => {
-  const { name, common_parent_section_name, parent_section_name, lesson_item_count, range_configs, question_set_id, solution_set_id, items } = req.body;
+  const { name, common_parent_section_name, parent_section_name, lesson_item_count, range_configs, question_set_id, solution_set_id, items, question_type } = req.body;
+  console.log('POST /lessons - question_type:', question_type);
+  console.log('POST /lessons - range_configs:', JSON.stringify(range_configs, null, 2));
 
   // Name is required for Auto Split mode, not for Manual Range mode (which has lesson_name per range)
   if (!range_configs && (!name || !name.trim())) {
@@ -159,6 +161,7 @@ router.post('/', asyncHandler(async (req, res) => {
       question_set_id,
       solution_set_id,
       items, // Optional: pre-edited items from the prepare modal
+      question_type: question_type || 'OTHER',
     });
 
     res.status(201).json({ success: true, data: lessons });

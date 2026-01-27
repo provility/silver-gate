@@ -60,14 +60,21 @@ export const chapterService = {
   },
 
   async update(id, chapterData) {
+    const updateFields = {
+      name: chapterData.name,
+      display_name: chapterData.display_name,
+      chapter_number: chapterData.chapter_number,
+      position: chapterData.position,
+    };
+
+    // Only update ref_id if provided
+    if (chapterData.ref_id !== undefined) {
+      updateFields.ref_id = chapterData.ref_id;
+    }
+
     const { data, error } = await supabase
       .from('chapters')
-      .update({
-        name: chapterData.name,
-        display_name: chapterData.display_name,
-        chapter_number: chapterData.chapter_number,
-        position: chapterData.position,
-      })
+      .update(updateFields)
       .eq('id', id)
       .select()
       .single();
