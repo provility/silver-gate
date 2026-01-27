@@ -55,11 +55,12 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: lesson });
 }));
 
-// Create a new lesson (or multiple lessons if lesson_item_count is provided)
+// Create a new lesson (or multiple lessons if lesson_item_count or range_configs is provided)
 router.post('/', asyncHandler(async (req, res) => {
-  const { name, common_parent_section_name, lesson_item_count, question_set_id, solution_set_id, items } = req.body;
+  const { name, common_parent_section_name, parent_section_name, lesson_item_count, range_configs, question_set_id, solution_set_id, items } = req.body;
 
-  if (!name || !name.trim()) {
+  // Name is required for Auto Split mode, not for Manual Range mode (which has lesson_name per range)
+  if (!range_configs && (!name || !name.trim())) {
     return res.status(400).json({
       success: false,
       error: 'Lesson name is required',
@@ -80,11 +81,81 @@ router.post('/', asyncHandler(async (req, res) => {
     });
   }
 
+  // Validate range_configs if provided
+  if (range_configs) {
+    if (!Array.isArray(range_configs)) {
+      return res.status(400).json({
+        success: false,
+        error: 'range_configs must be an array',
+      });
+    }
+
+    if (range_configs.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'range_configs must have at least one range',
+      });
+    }
+
+    // Get total items count from provided items or will be validated in service
+    const totalItems = items?.length || 0;
+    if (totalItems > 0 && range_configs.length > totalItems) {
+      return res.status(400).json({
+        success: false,
+        error: `Number of ranges (${range_configs.length}) cannot exceed total items (${totalItems})`,
+      });
+    }
+
+    for (let i = 0; i < range_configs.length; i++) {
+      const config = range_configs[i];
+
+      // Validate lesson_name is provided
+      if (!config.lesson_name || !config.lesson_name.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: `Range ${i + 1}: lesson_name is required`,
+        });
+      }
+
+      if (typeof config.start !== 'number' || typeof config.end !== 'number') {
+        return res.status(400).json({
+          success: false,
+          error: `Range ${i + 1}: start and end must be numbers`,
+        });
+      }
+      if (config.start < 1) {
+        return res.status(400).json({
+          success: false,
+          error: `Range ${i + 1}: start must be >= 1`,
+        });
+      }
+      if (config.start > config.end) {
+        return res.status(400).json({
+          success: false,
+          error: `Range ${i + 1}: start must be <= end`,
+        });
+      }
+    }
+
+    // Check for overlapping ranges
+    const sortedRanges = [...range_configs].sort((a, b) => a.start - b.start);
+    for (let i = 1; i < sortedRanges.length; i++) {
+      if (sortedRanges[i].start <= sortedRanges[i - 1].end) {
+        return res.status(400).json({
+          success: false,
+          error: `Ranges overlap: ${sortedRanges[i - 1].start}-${sortedRanges[i - 1].end} and ${sortedRanges[i].start}-${sortedRanges[i].end}`,
+        });
+      }
+    }
+  }
+
   try {
     const lessons = await lessonsService.create({
-      name: name.trim(),
+      name: name?.trim() || null,
       common_parent_section_name: common_parent_section_name?.trim() || null,
+      parent_section_name: parent_section_name?.trim() || null,
       lesson_item_count: lesson_item_count ? parseInt(lesson_item_count, 10) : null,
+      range_configs: range_configs || null,
       question_set_id,
       solution_set_id,
       items, // Optional: pre-edited items from the prepare modal
@@ -92,6 +163,7 @@ router.post('/', asyncHandler(async (req, res) => {
 
     res.status(201).json({ success: true, data: lessons });
   } catch (error) {
+    console.error('Error creating lesson:', error);
     return res.status(400).json({
       success: false,
       error: error.message,

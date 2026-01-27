@@ -7,9 +7,16 @@ const LLAMAPARSE_API_KEY = config.llamaParse.apiKey;
 // Parsing instructions by source type
 const SOLUTION_PARSING_INSTRUCTIONS = {
   'Question Bank': `
-CRITICAL: Extract EVERY SINGLE solution with its COMPLETE worked solution. Do NOT skip any content.
+CRITICAL: Extract EVERY SINGLE solution as a SEPARATE JSON object. Each solution must be its own entry in the solutions array.
 
 This document contains solutions for competitive exam questions (JEE, NEET, etc.).
+
+CRITICAL - SOLUTION SEPARATION:
+- Each question number (1, 2, 3, ..., 30) is a SEPARATE solution
+- NEVER combine multiple solutions into one JSON object
+- When you see "8. (D)" or "\\section*{8. (D)}", that is the START of solution 8 and the END of solution 7
+- Each worked_solution field contains ONLY the content for THAT specific question
+- If you see content like "7. (D) ... content ... 8. (D) ... more content", these are TWO separate solutions, not one
 
 IMPORTANT - HANDLING IMAGES:
 - Solutions may contain image references like: ![](https://cdn.mathpix.com/cropped/...)
@@ -145,25 +152,32 @@ You MUST extract ALL content from "22. (11.00)" until "23." - include EVERY equa
   "explanation": ""
 }
 
-MANDATORY RULES:
-- EXTRACT image URL from ![](url) into visual_path field, then CONTINUE extracting ALL content after it
-- A solution includes EVERYTHING from the answer key until the NEXT question number appears
-- The NEXT question number looks like: "6.", "7.", "23.", etc. at the START of a line
+MANDATORY RULE 1 - SOLUTION SEPARATION (MOST IMPORTANT):
+- Create ONE JSON object per solution - NEVER combine multiple solutions into one object
+- Solution N ENDS when you see "N+1. (X)" pattern (where X is an answer like A, B, C, D, or a number)
+- Example: Solution 7's worked_solution ENDS when you see "8. (D)" - do NOT include "8. (D)" or anything after
+- Example: Solution 22's worked_solution ENDS when you see "23. (514.00)"
+- If your worked_solution for question 7 contains "\\section*{8." or "8. (D)", you made an ERROR
+- Each worked_solution must contain ONLY that question's content, NOTHING from subsequent questions
+- The document has 30 solutions - you must create exactly 30 separate JSON objects
+
+MANDATORY RULE 2 - COMPLETE CONTENT WITHIN BOUNDARIES:
+- EXTRACT image URL from ![](url) into visual_path field, then extract ALL content after it
+- Within a solution's boundaries, include EVERYTHING until the next question number
 - Do NOT stop at:
   - Image references ![](...)
   - Multiple $\\begin{gathered}...\\end{gathered}$ blocks - include ALL of them
   - Multiple $\\begin{aligned}...\\end{aligned}$ blocks - include ALL of them
   - Blank lines
   - Any math-only lines
-  - Transitional phrases like "Equation will become", "Therefore", "Hence", "So", "Thus", "We get"
+  - Transitional phrases like "Equation will become", "Therefore", "Hence"
   - Lines with only inline math like $x^2 - y^2 = 10xy$
 - When you see phrases like "Equation will become" or "Therefore", ALL equations that follow MUST be included
-- Multiple math blocks in one solution are COMMON - extract ALL of them
-- Keep extracting until you see the pattern "^\\d+\\." (next question number at line start)
+- Keep extracting until you see the NEXT question number pattern "^\\d+\\." at line start
 - Include determinants, matrices, vectors - preserve ALL LaTeX exactly
 - For numerical answers like (11.00), extract "11.00" as the answer_key
 - Join multiple lines/blocks with \\n in the worked_solution
-- NEVER truncate a solution - include EVERY line until the next question number
+- NEVER truncate - include EVERY line until the next question number
 
 CRITICAL - NO PLACEHOLDERS OR ABBREVIATIONS:
 - NEVER use "..." or ellipsis as a placeholder for actual content
@@ -180,9 +194,15 @@ CRITICAL - SOLUTIONS WITH IMAGES:
 - An EMPTY worked_solution for a solution with an image is WRONG - there is always content to extract
 `,
   'Academic Book': `
-CRITICAL: Extract EVERY SINGLE solution with its COMPLETE worked solution. Do NOT skip any content.
+CRITICAL: Extract EVERY SINGLE solution as a SEPARATE JSON object. Each solution must be its own entry.
 
 This is an academic textbook solutions section.
+
+CRITICAL - SOLUTION SEPARATION:
+- Each question number (1, 2, 3, ...) is a SEPARATE solution
+- NEVER combine multiple solutions into one JSON object
+- When you see "8. (D)" that is the START of solution 8 and the END of solution 7
+- Each worked_solution field contains ONLY the content for THAT specific question
 
 IMPORTANT - HANDLING IMAGES:
 - Solutions may contain image references like: ![](https://cdn.mathpix.com/cropped/...)
@@ -366,12 +386,8 @@ export const solutionExtractionService = {
       const parsedSolutions = this.parseSolutionsFromContent(rawResult);
       console.log(`[SOLUTION_EXTRACT] Parsed solutions count: ${parsedSolutions.solutions?.length || 0}`);
 
-      // Add post-processing to fix truncated solutions (use combinedContent for original text)
-      const fixedSolutions = this.fixTruncatedSolutions(parsedSolutions, combinedContent);
-      console.log(`[SOLUTION_EXTRACT] After truncation fix, solutions count: ${fixedSolutions.solutions?.length || 0}`);
-
-      // Extract visual paths (image URLs) and content from original LaTeX content
-      const visualPathSolutions = this.extractVisualPaths(fixedSolutions, combinedContent);
+      // Extract visual paths (image URLs) from original LaTeX content - ONLY extracts URLs, does not modify content
+      const visualPathSolutions = this.extractVisualPaths(parsedSolutions, combinedContent);
       console.log(`[SOLUTION_EXTRACT] After visual path extraction, solutions count: ${visualPathSolutions.solutions?.length || 0}`);
 
       // Format LaTeX blocks for ALL solutions (ensures proper rendering)
@@ -774,26 +790,93 @@ export const solutionExtractionService = {
         workedSolution.trim().endsWith(indicator)
       );
 
-      if (endsWithIndicator) {
+      // Also check if solution appears truncated by comparing with raw content
+      // This helps catch cases where LlamaParse stopped mid-solution
+      let needsMoreContent = endsWithIndicator;
+
+      if (!needsMoreContent && workedSolution.length > 50) {
+        // Check if raw content has significantly more content for this solution
+        const rawSolutionContent = this.extractSolutionFromRaw(solution.question_label, rawContent);
+        if (rawSolutionContent && rawSolutionContent.length > workedSolution.length + 200) {
+          needsMoreContent = true;
+          console.log(`[SOLUTION_EXTRACT] Question ${solution.question_label}: raw has ${rawSolutionContent.length} chars vs current ${workedSolution.length} chars`);
+        }
+      }
+
+      if (needsMoreContent) {
         console.log(`[SOLUTION_EXTRACT] Detected truncated solution for question ${solution.question_label}`);
 
-        // Find this solution in rawContent and extract remaining content
-        const additionalContent = this.extractRemainingContent(
-          solution.question_label,
-          workedSolution,
-          rawContent
-        );
+        // Get full solution content from raw
+        const fullRawContent = this.extractSolutionFromRaw(solution.question_label, rawContent);
 
-        if (additionalContent) {
-          console.log(`[SOLUTION_EXTRACT] Found additional content for question ${solution.question_label}: ${additionalContent.substring(0, 100)}...`);
-          solution.worked_solution = workedSolution + '\n' + additionalContent;
+        if (fullRawContent && fullRawContent.length > workedSolution.length) {
+          console.log(`[SOLUTION_EXTRACT] Replacing truncated solution for question ${solution.question_label} (${workedSolution.length} -> ${fullRawContent.length} chars)`);
+          solution.worked_solution = fullRawContent;
         } else {
-          console.log(`[SOLUTION_EXTRACT] Could not find additional content for question ${solution.question_label}`);
+          // Fallback to appending remaining content
+          const additionalContent = this.extractRemainingContent(
+            solution.question_label,
+            workedSolution,
+            rawContent
+          );
+
+          if (additionalContent) {
+            console.log(`[SOLUTION_EXTRACT] Found additional content for question ${solution.question_label}: ${additionalContent.substring(0, 100)}...`);
+            solution.worked_solution = workedSolution + '\n' + additionalContent;
+          } else {
+            console.log(`[SOLUTION_EXTRACT] Could not find additional content for question ${solution.question_label}`);
+          }
         }
       }
     }
 
     return solutions;
+  },
+
+  /**
+   * Extract full solution content from raw content for a given question
+   * @param {string} questionLabel - The question number/label
+   * @param {string} rawContent - Raw content
+   * @returns {string|null} - Full solution content or null
+   */
+  extractSolutionFromRaw(questionLabel, rawContent) {
+    const currentQuestionNum = parseInt(questionLabel);
+    const nextQuestionNum = currentQuestionNum + 1;
+
+    // Find where this solution starts
+    const solutionStartPattern = new RegExp(
+      `(?:^|\\n)\\s*${questionLabel}[\\s\\.\\)]+\\(?[A-Da-d0-9\\.]+\\)?`,
+      'i'
+    );
+
+    const startMatch = rawContent.match(solutionStartPattern);
+    if (!startMatch) return null;
+
+    const startIndex = startMatch.index + startMatch[0].length;
+
+    // Find where next sequential question starts
+    const nextQuestionPattern = new RegExp(
+      `\\n\\s*${nextQuestionNum}\\s*[\\.\\)]\\s*\\(?[A-Da-d0-9\\.]+\\)?`,
+      'i'
+    );
+
+    let endIndex = rawContent.length;
+    const nextMatch = rawContent.substring(startIndex).match(nextQuestionPattern);
+    if (nextMatch) {
+      endIndex = startIndex + nextMatch.index;
+    }
+
+    // Extract and clean content
+    const solutionContent = rawContent.substring(startIndex, endIndex).trim();
+
+    // Remove image markdown lines but keep the rest
+    const cleanedContent = solutionContent
+      .split('\n')
+      .filter(line => !line.trim().startsWith('!['))
+      .join('\n')
+      .trim();
+
+    return cleanedContent || null;
   },
 
   /**
@@ -861,7 +944,7 @@ export const solutionExtractionService = {
 
   /**
    * Extract visual paths (image URLs) from original content
-   * Also fills in empty worked_solution for solutions with images
+   * ONLY extracts image URLs - does NOT modify worked_solution (trust LlamaParse instructions)
    * @param {object} solutions - Parsed solutions object
    * @param {string} rawContent - Original combined LaTeX content
    * @returns {object} - Solutions with visual_path populated
@@ -875,10 +958,13 @@ export const solutionExtractionService = {
       const questionLabel = solution.question_label;
       if (!questionLabel) continue;
 
+      // Skip if visual_path already set by LlamaParse
+      if (solution.visual_path) continue;
+
       const currentQuestionNum = parseInt(questionLabel);
       const nextQuestionNum = currentQuestionNum + 1;
 
-      // Find where this solution starts in rawContent - use exact question number
+      // Find where this solution starts in rawContent
       const solutionStartPattern = new RegExp(
         `(?:^|\\n)\\s*${questionLabel}[\\s\\.\\)]+\\(?[A-Da-d0-9\\.]+\\)?`,
         'i'
@@ -889,8 +975,7 @@ export const solutionExtractionService = {
 
       const startIndex = startMatch.index;
 
-      // Find where NEXT SEQUENTIAL question starts (more strict)
-      // Look for the exact next question number at start of line
+      // Find where next question starts
       const nextQuestionPattern = new RegExp(
         `\\n\\s*${nextQuestionNum}\\s*[\\.\\)]\\s*\\(?[A-Da-d0-9\\.]+\\)?`,
         'i'
@@ -905,35 +990,73 @@ export const solutionExtractionService = {
       // Extract section for this solution
       const solutionSection = rawContent.substring(startIndex, endIndex);
 
-      // Find image in this section
+      // Find image in this section - ONLY extract URL
       const imageMatch = solutionSection.match(/!\[[^\]]*\]\(([^)]+)\)/);
 
       if (imageMatch && imageMatch[1]) {
-        // Set visual_path if not already set
-        if (!solution.visual_path) {
-          solution.visual_path = imageMatch[1];
-          console.log(`[SOLUTION_EXTRACT] Found visual_path for question ${questionLabel}: ${imageMatch[1].substring(0, 60)}...`);
+        solution.visual_path = imageMatch[1];
+        console.log(`[SOLUTION_EXTRACT] Found visual_path for question ${questionLabel}: ${imageMatch[1].substring(0, 60)}...`);
+      }
+    }
+
+    return solutions;
+  },
+
+  /**
+   * Clean up solutions that have content from subsequent solutions merged in
+   * LlamaParse sometimes fails to separate solutions properly
+   * @param {object} solutions - Solutions object
+   * @returns {object} - Cleaned solutions
+   */
+  cleanMergedSolutions(solutions) {
+    if (!solutions.solutions || !Array.isArray(solutions.solutions)) {
+      return solutions;
+    }
+
+    for (const solution of solutions.solutions) {
+      const questionNum = parseInt(solution.question_label);
+      const workedSolution = solution.worked_solution || '';
+
+      if (!workedSolution || workedSolution.length < 500) {
+        continue; // Skip short solutions - unlikely to have merged content
+      }
+
+      // Look for patterns that indicate another solution is embedded
+      // Patterns: "8. (D)", "\section*{8. (D)}", "8. (D)\n", etc.
+      const nextNum = questionNum + 1;
+
+      // Look for section headers of ANY higher question number
+      // Pattern: \section*{N. (X)} where N > current question number
+      const sectionPattern = /\\section\*?\{\s*(\d+)\.\s*\([A-Da-d0-9\.]+\)\s*\}/gi;
+
+      let truncateIndex = -1;
+      let match;
+      while ((match = sectionPattern.exec(workedSolution)) !== null) {
+        const foundNum = parseInt(match[1]);
+        if (foundNum > questionNum) {
+          truncateIndex = match.index;
+          console.log(`[SOLUTION_EXTRACT] Found merged content in Q${questionNum} - Q${foundNum} header at position ${truncateIndex}`);
+          break;
         }
+      }
 
-        // If worked_solution is EMPTY, extract content after image
-        if (!solution.worked_solution || solution.worked_solution.trim() === '') {
-          const imageEndIndex = solutionSection.indexOf(imageMatch[0]) + imageMatch[0].length;
-          const contentAfterImage = solutionSection.substring(imageEndIndex).trim();
-
-          if (contentAfterImage) {
-            // Clean content - remove any image markdown lines
-            const cleanedContent = contentAfterImage
-              .split('\n')
-              .filter(line => !line.trim().startsWith('!['))
-              .join('\n')
-              .trim();
-
-            if (cleanedContent) {
-              solution.worked_solution = cleanedContent;
-              console.log(`[SOLUTION_EXTRACT] Filled empty worked_solution for question ${questionLabel} from raw content (${cleanedContent.length} chars)`);
-            }
+      // Also check for newline + "N. (X)" pattern for higher question numbers
+      if (truncateIndex === -1) {
+        const linePattern = /\n\s*(\d+)\.\s*\([A-Da-d0-9\.]+\)\s*\n/gi;
+        while ((match = linePattern.exec(workedSolution)) !== null) {
+          const foundNum = parseInt(match[1]);
+          if (foundNum > questionNum) {
+            truncateIndex = match.index;
+            console.log(`[SOLUTION_EXTRACT] Found merged content in Q${questionNum} - Q${foundNum} line header at position ${truncateIndex}`);
+            break;
           }
         }
+      }
+
+      if (truncateIndex > 0) {
+        const truncatedContent = workedSolution.substring(0, truncateIndex).trim();
+        console.log(`[SOLUTION_EXTRACT] Truncating Q${questionNum} from ${workedSolution.length} to ${truncatedContent.length} chars`);
+        solution.worked_solution = truncatedContent;
       }
     }
 

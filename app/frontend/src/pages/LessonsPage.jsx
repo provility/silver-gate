@@ -245,7 +245,10 @@ export default function LessonsPage() {
                     Name
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Book / Chapter
+                    Range
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Order
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Items
@@ -280,23 +283,20 @@ export default function LessonsPage() {
                         )}
                       </button>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4 max-w-xs">
                       <div className="flex items-center">
-                        <BookOpen className="w-5 h-5 text-green-500 mr-3" />
-                        <span className="text-sm font-medium text-gray-900">{lesson.name}</span>
+                        <BookOpen className="w-5 h-5 text-green-500 mr-3 flex-shrink-0" />
+                        <span className="text-sm font-medium text-gray-900 truncate" title={lesson.name}>{lesson.name}</span>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-500">
-                        {lesson.book?.display_name || '-'}
-                        {lesson.chapter?.display_name && ` / ${lesson.chapter.display_name}`}
-                      </div>
+                      <span className="text-sm text-gray-600">{lesson.question_range || '-'}</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-900">{getLessonCount(lesson)}</span>
-                        <span className="text-xs text-gray-500">questions</span>
-                      </div>
+                      <span className="text-sm text-gray-600">{lesson.display_order ?? '-'}</span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="text-sm text-blue-600 hover:text-blue-800 hover:underline cursor-pointer">{getLessonCount(lesson)}</span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col gap-1 text-xs text-gray-500">
@@ -317,7 +317,7 @@ export default function LessonsPage() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2 text-sm text-gray-500">
                         <Calendar className="w-4 h-4" />
-                        {new Date(lesson.created_at).toLocaleDateString()}
+                        {new Date(lesson.created_at).toLocaleString()}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">

@@ -1,4 +1,5 @@
 import { supabase } from '../config/database.js';
+import { generateMongoId } from '../utils/mongoId.js';
 
 export const chapterService = {
   async getAll(bookId = null) {
@@ -49,6 +50,7 @@ export const chapterService = {
         chapter_number: chapterData.chapter_number,
         position: chapterData.position,
         source_id: chapterData.source_id,
+        ref_id: chapterData.ref_id || generateMongoId(),
       })
       .select()
       .single();

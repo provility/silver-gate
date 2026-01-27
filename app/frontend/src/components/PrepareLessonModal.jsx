@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { BookOpen, X, Filter, FileQuestion, CheckCircle, Eye, Loader2, Code, Edit3, Save, Plus, Minus, CheckCheck, AlertCircle } from 'lucide-react';
+import { BookOpen, X, Filter, FileQuestion, CheckCircle, Eye, Loader2, Code, Edit3, Save, Plus, Minus, CheckCheck, AlertCircle, Trash2, AlertTriangle } from 'lucide-react';
 import QuestionSetModal from './QuestionSetModal';
 import SolutionSetModal from './SolutionSetModal';
 import QuestionText from './QuestionText';
@@ -273,7 +273,14 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
   const [showJsonView, setShowJsonView] = useState(false);
   const [lessonName, setLessonName] = useState('');
   const [commonParentSectionName, setCommonParentSectionName] = useState('');
+  const [parentSectionName, setParentSectionName] = useState('');
   const [lessonItemCount, setLessonItemCount] = useState('');
+
+  // Manual range mode state
+  const [splitMode, setSplitMode] = useState('auto'); // 'auto' | 'manual'
+  const [rangeConfigs, setRangeConfigs] = useState([
+    { start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }
+  ]);
 
   // Fetch books
   const { data: books } = useQuery({
@@ -317,7 +324,10 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
       setShowJsonView(false);
       setLessonName('');
       setCommonParentSectionName('');
+      setParentSectionName('');
       setLessonItemCount('');
+      setSplitMode('auto');
+      setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
     }
   }, [isOpen]);
 
@@ -377,19 +387,39 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
       setPreparedData(response.data);
       setEditedItems(response.data.items || []);
       setEditingItemIndex(null);
+      // Reset range configs with total items available
+      const totalItems = response.data.items?.length || 0;
+      setRangeConfigs([{ start: 1, end: totalItems, lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
     },
   });
 
   // Create lesson mutation
   const createLessonMutation = useMutation({
-    mutationFn: () => api.post('/lessons', {
-      name: lessonName.trim(),
-      common_parent_section_name: commonParentSectionName.trim() || null,
-      lesson_item_count: lessonItemCount ? parseInt(lessonItemCount, 10) : null,
-      question_set_id: selectedQuestionSetId,
-      solution_set_id: selectedSolutionSetId,
-      items: editedItems,
-    }),
+    mutationFn: () => {
+      const payload = {
+        question_set_id: selectedQuestionSetId,
+        solution_set_id: selectedSolutionSetId,
+        items: editedItems,
+      };
+
+      if (splitMode === 'auto') {
+        payload.name = lessonName.trim();
+        payload.common_parent_section_name = commonParentSectionName.trim() || null;
+        payload.parent_section_name = parentSectionName.trim() || null;
+        payload.lesson_item_count = lessonItemCount ? parseInt(lessonItemCount, 10) : null;
+      } else {
+        // Manual mode - send range_configs with lesson_name per range
+        payload.range_configs = rangeConfigs.map(config => ({
+          start: parseInt(config.start, 10),
+          end: parseInt(config.end, 10),
+          lesson_name: config.lesson_name.trim(),
+          parent_section_name: config.parent_section_name.trim() || null,
+          common_parent_section_name: config.common_parent_section_name.trim() || null,
+        }));
+      }
+
+      return api.post('/lessons', payload);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['lessons']);
       handleClose();
@@ -426,7 +456,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
 
   const handleCreateLesson = (e) => {
     e.preventDefault();
-    if (lessonName.trim()) {
+    if (canCreateLesson) {
       createLessonMutation.mutate();
     }
   };
@@ -438,7 +468,10 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
     setShowJsonView(false);
     setLessonName('');
     setCommonParentSectionName('');
+    setParentSectionName('');
     setLessonItemCount('');
+    setSplitMode('auto');
+    setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
     prepareLessonMutation.reset();
     createLessonMutation.reset();
     onClose();
@@ -451,7 +484,10 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
     setShowJsonView(false);
     setLessonName('');
     setCommonParentSectionName('');
+    setParentSectionName('');
     setLessonItemCount('');
+    setSplitMode('auto');
+    setRangeConfigs([{ start: 1, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }]);
     prepareLessonMutation.reset();
   };
 
@@ -495,6 +531,123 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
       return updated;
     });
   }, []);
+
+  // Range config handlers
+  const handleRangeConfigChange = useCallback((index, field, value) => {
+    setRangeConfigs(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  }, []);
+
+  const handleAddRangeConfig = useCallback(() => {
+    setRangeConfigs(prev => {
+      const lastRange = prev[prev.length - 1];
+      const newStart = lastRange?.end ? parseInt(lastRange.end, 10) + 1 : 1;
+      return [...prev, { start: newStart, end: '', lesson_name: '', parent_section_name: '', common_parent_section_name: '' }];
+    });
+  }, []);
+
+  const handleRemoveRangeConfig = useCallback((index) => {
+    setRangeConfigs(prev => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
+  }, []);
+
+  // Validate range configs
+  const rangeValidation = useMemo(() => {
+    const totalItems = editedItems.length;
+    const errors = [];
+    const warnings = [];
+
+    if (splitMode !== 'manual' || totalItems === 0) {
+      return { errors, warnings, isValid: true };
+    }
+
+    // Check if range count exceeds total items
+    if (rangeConfigs.length > totalItems) {
+      errors.push(`Number of ranges (${rangeConfigs.length}) cannot exceed total items (${totalItems})`);
+      return { errors, warnings, isValid: false };
+    }
+
+    // Check each range
+    const sortedRanges = [...rangeConfigs]
+      .map((config, i) => ({ ...config, originalIndex: i }))
+      .filter(config => config.start !== '' && config.end !== '')
+      .sort((a, b) => parseInt(a.start, 10) - parseInt(b.start, 10));
+
+    for (let idx = 0; idx < rangeConfigs.length; idx++) {
+      const config = rangeConfigs[idx];
+      const start = parseInt(config.start, 10);
+      const end = parseInt(config.end, 10);
+
+      if (!config.lesson_name || !config.lesson_name.trim()) {
+        errors.push(`Range ${idx + 1}: Lesson name is required`);
+      }
+
+      if (config.start === '' || config.end === '') {
+        errors.push(`Range ${idx + 1}: Start and end values are required`);
+        continue;
+      }
+
+      if (isNaN(start) || isNaN(end)) {
+        errors.push(`Range ${idx + 1}: Start and end must be valid numbers`);
+        continue;
+      }
+
+      if (start < 1) {
+        errors.push(`Range ${idx + 1}: Start value must be >= 1`);
+      }
+
+      if (end > totalItems) {
+        errors.push(`Range ${idx + 1}: End value must be <= ${totalItems} (total items)`);
+      }
+
+      if (start > end) {
+        errors.push(`Range ${idx + 1}: Start (${start}) must be <= End (${end})`);
+      }
+    }
+
+    // Check for overlaps
+    for (let i = 1; i < sortedRanges.length; i++) {
+      const prevEnd = parseInt(sortedRanges[i - 1].end, 10);
+      const currStart = parseInt(sortedRanges[i].start, 10);
+      if (currStart <= prevEnd) {
+        errors.push(`Ranges overlap: ${sortedRanges[i - 1].start}-${sortedRanges[i - 1].end} and ${sortedRanges[i].start}-${sortedRanges[i].end}`);
+      }
+    }
+
+    // Check for coverage gaps (warning only)
+    if (errors.length === 0 && sortedRanges.length > 0) {
+      const coveredItems = new Set();
+      for (const config of sortedRanges) {
+        for (let i = parseInt(config.start, 10); i <= parseInt(config.end, 10); i++) {
+          coveredItems.add(i);
+        }
+      }
+      const uncoveredCount = totalItems - coveredItems.size;
+      if (uncoveredCount > 0) {
+        warnings.push(`${uncoveredCount} items are not covered by any range`);
+      }
+    }
+
+    return {
+      errors,
+      warnings,
+      isValid: errors.length === 0,
+    };
+  }, [splitMode, rangeConfigs, editedItems.length]);
+
+  // Check if form is valid for submission
+  const canCreateLesson = useMemo(() => {
+    if (splitMode === 'auto') {
+      return lessonName.trim() !== '';
+    }
+    // Manual mode - validation includes lesson_name check per range
+    return rangeValidation.isValid && rangeConfigs.some(c => c.start !== '' && c.end !== '' && c.lesson_name.trim() !== '');
+  }, [lessonName, splitMode, rangeValidation.isValid, rangeConfigs]);
 
   if (!isOpen) return null;
 
@@ -562,70 +715,241 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
 
           {/* Footer - Create Lesson Form */}
           <div className="p-4 border-t bg-gray-50">
-            <form onSubmit={handleCreateLesson} className="flex items-end gap-4">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Lesson Name
+            <form onSubmit={handleCreateLesson} className="space-y-4">
+              {/* Lesson Name - Only shown in Auto Split mode */}
+              {splitMode === 'auto' && (
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Lesson Name
+                    </label>
+                    <input
+                      type="text"
+                      value={lessonName}
+                      onChange={(e) => setLessonName(e.target.value)}
+                      placeholder="e.g., Chapter 3 Practice Problems"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Mode Toggle */}
+              <div className="flex items-center gap-6 py-2">
+                <span className="text-sm font-medium text-gray-700">Split Mode:</span>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="splitMode"
+                    value="auto"
+                    checked={splitMode === 'auto'}
+                    onChange={() => setSplitMode('auto')}
+                    className="w-4 h-4 text-green-600 focus:ring-green-500"
+                  />
+                  <span className="text-sm text-gray-700">Auto Split (Items per Lesson)</span>
                 </label>
-                <input
-                  type="text"
-                  value={lessonName}
-                  onChange={(e) => setLessonName(e.target.value)}
-                  placeholder="e.g., Chapter 3 Practice Problems"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                  required
-                />
-              </div>
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Common Parent Section Name
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="splitMode"
+                    value="manual"
+                    checked={splitMode === 'manual'}
+                    onChange={() => setSplitMode('manual')}
+                    className="w-4 h-4 text-green-600 focus:ring-green-500"
+                  />
+                  <span className="text-sm text-gray-700">Manual Ranges</span>
                 </label>
-                <input
-                  type="text"
-                  value={commonParentSectionName}
-                  onChange={(e) => setCommonParentSectionName(e.target.value)}
-                  placeholder="e.g., Algebra Basics"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                />
               </div>
-              <div className="w-32">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Items per Lesson
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={lessonItemCount}
-                  onChange={(e) => setLessonItemCount(e.target.value)}
-                  placeholder="e.g., 5"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                />
+
+              {/* Auto Split Mode UI */}
+              {splitMode === 'auto' && (
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Parent Section Name
+                    </label>
+                    <input
+                      type="text"
+                      value={parentSectionName}
+                      onChange={(e) => setParentSectionName(e.target.value)}
+                      placeholder="e.g., Section A"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Common Parent Section Name
+                    </label>
+                    <input
+                      type="text"
+                      value={commonParentSectionName}
+                      onChange={(e) => setCommonParentSectionName(e.target.value)}
+                      placeholder="e.g., Algebra Basics"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                  <div className="w-32">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Items per Lesson
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={lessonItemCount}
+                      onChange={(e) => setLessonItemCount(e.target.value)}
+                      placeholder="e.g., 5"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Manual Ranges Mode UI */}
+              {splitMode === 'manual' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-700">
+                      Range Configurations ({editedItems.length} items available)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddRangeConfig}
+                      disabled={rangeConfigs.length >= editedItems.length}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Range
+                    </button>
+                  </div>
+
+                  {/* Range Config Rows */}
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {rangeConfigs.map((config, index) => (
+                      <div key={index} className="p-3 bg-white rounded-lg border space-y-2">
+                        {/* Row 1: Lesson Name */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-500 mb-1">Lesson Name *</label>
+                            <input
+                              type="text"
+                              value={config.lesson_name}
+                              onChange={(e) => handleRangeConfigChange(index, 'lesson_name', e.target.value)}
+                              placeholder="e.g., Chapter 3 Problems"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRangeConfig(index)}
+                            disabled={rangeConfigs.length <= 1}
+                            className="p-1.5 text-red-500 hover:bg-red-50 rounded disabled:text-gray-300 disabled:hover:bg-transparent transition-colors mt-4"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        {/* Row 2: Range and Section Names */}
+                        <div className="flex items-center gap-2">
+                          <div className="w-20">
+                            <label className="block text-xs text-gray-500 mb-1">Start</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={editedItems.length}
+                              value={config.start}
+                              onChange={(e) => handleRangeConfigChange(index, 'start', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
+                            />
+                          </div>
+                          <div className="w-20">
+                            <label className="block text-xs text-gray-500 mb-1">End</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={editedItems.length}
+                              value={config.end}
+                              onChange={(e) => handleRangeConfigChange(index, 'end', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-500 mb-1">Parent Section Name</label>
+                            <input
+                              type="text"
+                              value={config.parent_section_name}
+                              onChange={(e) => handleRangeConfigChange(index, 'parent_section_name', e.target.value)}
+                              placeholder="e.g., Section A"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-xs text-gray-500 mb-1">Common Parent Section</label>
+                            <input
+                              type="text"
+                              value={config.common_parent_section_name}
+                              onChange={(e) => handleRangeConfigChange(index, 'common_parent_section_name', e.target.value)}
+                              placeholder="e.g., Algebra"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Validation Messages */}
+                  {rangeValidation.errors.length > 0 && (
+                    <div className="flex items-start gap-2 p-2 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-red-600">
+                        {rangeValidation.errors.map((error, i) => (
+                          <div key={i}>{error}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {rangeValidation.warnings.length > 0 && rangeValidation.errors.length === 0 && (
+                    <div className="flex items-start gap-2 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <AlertTriangle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
+                      <div className="text-sm text-yellow-700">
+                        {rangeValidation.warnings.map((warning, i) => (
+                          <div key={i}>{warning}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={handleBackToSelection}
+                  disabled={createLessonMutation.isPending}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canCreateLesson || createLessonMutation.isPending}
+                  className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                >
+                  {createLessonMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Create Lesson{splitMode === 'manual' && rangeConfigs.filter(c => c.start && c.end).length > 1 ? 's' : ''}
+                    </>
+                  )}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleBackToSelection}
-                disabled={createLessonMutation.isPending}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 transition-colors"
-              >
-                Back
-              </button>
-              <button
-                type="submit"
-                disabled={!lessonName.trim() || createLessonMutation.isPending}
-                className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-              >
-                {createLessonMutation.isPending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    Create Lesson
-                  </>
-                )}
-              </button>
             </form>
             {createLessonMutation.isError && (
               <p className="mt-2 text-sm text-red-600">

@@ -172,11 +172,17 @@ export const lessonsService = {
   },
 
   /**
-   * Create a new lesson (or multiple lessons if lesson_item_count is provided)
+   * Create a new lesson (or multiple lessons if lesson_item_count or range_configs is provided)
    * If `items` array is provided, use those directly (for edited/custom items)
-   * If `lesson_item_count` is provided, split items into chunks and create multiple lessons
+   * If `lesson_item_count` is provided, split items into chunks and create multiple lessons (Auto Split mode)
+   * If `range_configs` is provided, create lessons based on custom ranges (Manual Range mode)
+   *
+   * Auto Split mode: Uses shared `name`, `common_parent_section_name`, and `parent_section_name`
+   * Manual Range mode: Each range has its own `lesson_name`, `parent_section_name`, and `common_parent_section_name`
+   *
+   * range_configs format: [{ start: 1, end: 20, lesson_name: 'Lesson 1', parent_section_name: 'Section A', common_parent_section_name: 'Algebra' }, ...]
    */
-  async create({ name, common_parent_section_name, lesson_item_count, question_set_id, solution_set_id, items: providedItems }) {
+  async create({ name, common_parent_section_name, parent_section_name, lesson_item_count, range_configs, question_set_id, solution_set_id, items: providedItems }) {
     // Fetch question set
     const questionSet = await questionExtractionService.findById(question_set_id);
     if (!questionSet) {
@@ -295,8 +301,31 @@ export const lessonsService = {
         .trim();
     };
 
+    // Helper function to get the next display_order value for a chapter
+    const getNextOrderForChapter = async (chapterId) => {
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('display_order')
+        .eq('chapter_id', chapterId)
+        .not('display_order', 'is', null)
+        .order('display_order', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+
+      // If no lessons exist or none have display_order, start at 1
+      if (!data || data.length === 0 || data[0].display_order === null) {
+        return 1;
+      }
+
+      return data[0].display_order + 1;
+    };
+
     // Helper function to create a single lesson with its items
-    const createSingleLesson = async (lessonName, lessonItems) => {
+    // lessonCommonParentSectionName and lessonParentSectionName are optional overrides for manual range mode
+    // questionRange is the string representation of the range (e.g., "1 - 10")
+    // display_orderValue is the display_order of this lesson within its chapter
+    const createSingleLesson = async (lessonName, lessonItems, lessonCommonParentSectionName = null, lessonParentSectionName = null, questionRange = null, display_orderValue = null) => {
       // Generate toc_output_json from lesson items
       const tocQuestionItems = lessonItems.map((item, index) => {
         const questionId = String(index + 1);
@@ -325,16 +354,21 @@ export const lessonsService = {
       };
 
       // Create the lesson record
+      // Use provided overrides or fall back to main common_parent_section_name
       const { data: lesson, error: lessonError } = await supabase
         .from('lessons')
         .insert({
           name: lessonName,
-          common_parent_section_name,
+          common_parent_section_name: lessonCommonParentSectionName !== null ? lessonCommonParentSectionName : common_parent_section_name,
+          parent_section_name: lessonParentSectionName,
+          question_range: questionRange,
+          display_order: display_orderValue,
           book_id: questionSet.book_id,
           chapter_id: questionSet.chapter_id,
           question_set_id,
           solution_set_id,
           toc_output_json: tocOutputJson,
+          ref_id: generateMongoId(),
         })
         .select()
         .single();
@@ -378,13 +412,77 @@ export const lessonsService = {
       return lesson.id;
     };
 
+    // If range_configs is provided, use Manual Range Mode
+    if (range_configs && Array.isArray(range_configs) && range_configs.length > 0) {
+      // Validate that range count doesn't exceed total items
+      if (range_configs.length > mergedItems.length) {
+        throw new Error(`Number of ranges (${range_configs.length}) cannot exceed total items (${mergedItems.length})`);
+      }
+
+      // Get the starting display_order value for this chapter
+      let currentOrder = await getNextOrderForChapter(questionSet.chapter_id);
+
+      const createdLessonIds = [];
+
+      for (const config of range_configs) {
+        const {
+          start,
+          end,
+          lesson_name: rangeLessonName,
+          parent_section_name: rangeParentSectionName,
+          common_parent_section_name: rangeCommonParentSectionName
+        } = config;
+
+        // Validate lesson_name is provided
+        if (!rangeLessonName || !rangeLessonName.trim()) {
+          throw new Error(`lesson_name is required for each range`);
+        }
+
+        // Validate range (1-indexed)
+        if (start < 1 || end > mergedItems.length || start > end) {
+          throw new Error(`Invalid range: ${start}-${end}. Valid range is 1-${mergedItems.length}`);
+        }
+
+        // Extract items for this range (convert 1-indexed to 0-indexed)
+        const rangeItems = mergedItems.slice(start - 1, end);
+
+        // Create question_range string (e.g., "1 - 10")
+        const questionRange = `${start} - ${end}`;
+
+        // Use lesson_name from the config (no range appending)
+        const lessonId = await createSingleLesson(
+          rangeLessonName.trim(),
+          rangeItems,
+          rangeCommonParentSectionName || null,
+          rangeParentSectionName || null,
+          questionRange,
+          currentOrder
+        );
+        createdLessonIds.push(lessonId);
+        currentOrder++; // Increment display_order for next lesson
+      }
+
+      // Fetch and return all created lessons
+      const createdLessons = await Promise.all(
+        createdLessonIds.map(id => this.findById(id))
+      );
+
+      return createdLessons;
+    }
+
     // If lesson_item_count is not provided, create a single lesson with all items
     if (!lesson_item_count || lesson_item_count <= 0) {
-      const lessonId = await createSingleLesson(name, mergedItems);
+      const display_orderValue = await getNextOrderForChapter(questionSet.chapter_id);
+      const totalItems = mergedItems.length;
+      const questionRange = totalItems > 0 ? `1 - ${totalItems}` : null;
+      const lessonId = await createSingleLesson(name, mergedItems, null, parent_section_name, questionRange, display_orderValue);
       return await this.findById(lessonId);
     }
 
-    // Split items into chunks and create multiple lessons
+    // Split items into chunks and create multiple lessons (Auto Split mode)
+    // Get the starting display_order value for this chapter
+    let currentOrder = await getNextOrderForChapter(questionSet.chapter_id);
+
     const createdLessonIds = [];
     const totalItems = mergedItems.length;
 
@@ -393,11 +491,14 @@ export const lessonsService = {
       const startNum = i + 1;
       const endNum = Math.min(i + lesson_item_count, totalItems);
 
-      // Generate lesson name with range appended
-      const lessonNameWithRange = `${name} ${startNum}-${endNum}`;
+      // Create question_range string (e.g., "1 - 10")
+      const questionRange = `${startNum} - ${endNum}`;
 
-      const lessonId = await createSingleLesson(lessonNameWithRange, chunkItems);
+      // Use lesson name without range appending, store range in question_range column
+      // Pass parent_section_name for Auto Split mode (shared across all lessons)
+      const lessonId = await createSingleLesson(name, chunkItems, null, parent_section_name, questionRange, currentOrder);
       createdLessonIds.push(lessonId);
+      currentOrder++; // Increment display_order for next lesson
     }
 
     // Fetch and return all created lessons

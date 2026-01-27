@@ -1,4 +1,5 @@
 import { supabase } from '../config/database.js';
+import { generateMongoId } from '../utils/mongoId.js';
 
 export const bookService = {
   async getAll() {
@@ -30,6 +31,7 @@ export const bookService = {
         display_name: bookData.display_name,
         description: bookData.description,
         source_id: bookData.source_id,
+        ref_id: bookData.ref_id || generateMongoId(),
       })
       .select()
       .single();

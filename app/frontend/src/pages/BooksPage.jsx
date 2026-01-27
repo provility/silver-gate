@@ -11,8 +11,8 @@ export default function BooksPage() {
   const [editingBook, setEditingBook] = useState(null);
   const [editingChapter, setEditingChapter] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState({ type: null, item: null });
-  const [newBook, setNewBook] = useState({ name: '', display_name: '', description: '' });
-  const [newChapter, setNewChapter] = useState({ name: '', display_name: '', chapter_number: '' });
+  const [newBook, setNewBook] = useState({ name: '', display_name: '', description: '', ref_id: '' });
+  const [newChapter, setNewChapter] = useState({ name: '', display_name: '', chapter_number: '', ref_id: '' });
 
   // Fetch books
   const { data: books, isLoading: booksLoading } = useQuery({
@@ -42,7 +42,7 @@ export default function BooksPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['books'] });
       setShowAddBookModal(false);
-      setNewBook({ name: '', display_name: '', description: '' });
+      setNewBook({ name: '', display_name: '', description: '', ref_id: '' });
     },
   });
 
@@ -52,7 +52,7 @@ export default function BooksPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allChapters'] });
       setShowAddChapterModal(null);
-      setNewChapter({ name: '', display_name: '', chapter_number: '' });
+      setNewChapter({ name: '', display_name: '', chapter_number: '', ref_id: '' });
     },
   });
 
@@ -102,7 +102,10 @@ export default function BooksPage() {
 
   const handleAddBook = () => {
     if (newBook.name.trim()) {
-      addBookMutation.mutate(newBook);
+      addBookMutation.mutate({
+        ...newBook,
+        ref_id: newBook.ref_id.trim() || null,
+      });
     }
   };
 
@@ -112,6 +115,7 @@ export default function BooksPage() {
         ...newChapter,
         book_id: showAddChapterModal,
         chapter_number: newChapter.chapter_number ? parseInt(newChapter.chapter_number, 10) : null,
+        ref_id: newChapter.ref_id.trim() || null,
       });
     }
   };
@@ -351,6 +355,21 @@ export default function BooksPage() {
                   placeholder="Optional description"
                 />
               </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ref ID (MongoDB)
+                </label>
+                <input
+                  type="text"
+                  value={newBook.ref_id}
+                  onChange={(e) => setNewBook({ ...newBook, ref_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Optional - auto-generated if empty"
+                  maxLength={24}
+                />
+                <p className="text-xs text-gray-500 mt-1">24-character hex string for MongoDB sync</p>
+              </div>
             </div>
 
             <div className="flex justify-end gap-3 p-4 border-t">
@@ -424,6 +443,21 @@ export default function BooksPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="e.g., Algebra Basics"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ref ID (MongoDB)
+                </label>
+                <input
+                  type="text"
+                  value={newChapter.ref_id}
+                  onChange={(e) => setNewChapter({ ...newChapter, ref_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Optional - auto-generated if empty"
+                  maxLength={24}
+                />
+                <p className="text-xs text-gray-500 mt-1">24-character hex string for MongoDB sync</p>
               </div>
             </div>
 
