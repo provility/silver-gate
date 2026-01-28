@@ -308,54 +308,85 @@ router.post('/create-folders', asyncHandler(async (req, res) => {
         const itemFolderName = `question_${questionLabel}`;
         const itemFolderPath = path.join(trimmedBasePath, itemFolderName);
 
-        // Create the item folder
-        await fs.mkdir(itemFolderPath, { recursive: true });
-
-        // Create empty.txt with the lesson_item's ref_id
-        await fs.writeFile(
-          path.join(itemFolderPath, 'empty.txt'),
-          item.ref_id || '',
-          'utf-8'
-        );
-
-        // Create problem_statement.txt with the problem_statement field
-        await fs.writeFile(
-          path.join(itemFolderPath, 'problem_statement.txt'),
-          item.problem_statement || '',
-          'utf-8'
-        );
-
-        // Create solution_context.txt with the solution_context field
-        await fs.writeFile(
-          path.join(itemFolderPath, 'solution_context.txt'),
-          item.solution_context || '',
-          'utf-8'
-        );
-
-        const filesCreated = ['empty.txt', 'problem_statement.txt', 'solution_context.txt'];
-
-        // Download visual.png if visual_path exists in the JSON
-        const visualPath = item.question_solution_item_json?.visual_path;
-        if (visualPath && typeof visualPath === 'string' && visualPath.trim()) {
-          const visualDestPath = path.join(itemFolderPath, 'visual.png');
-          const downloaded = await downloadImage(visualPath.trim(), visualDestPath);
-          if (downloaded) {
-            filesCreated.push('visual.png');
-          }
+        // Check if the folder already exists
+        let folderExists = false;
+        try {
+          await fs.access(itemFolderPath);
+          folderExists = true;
+        } catch {
+          folderExists = false;
         }
 
-        // Create step_solutions subfolder
-        const stepSolutionsPath = path.join(itemFolderPath, 'step_solutions');
-        await fs.mkdir(stepSolutionsPath, { recursive: true });
+        const filesCreated = [];
 
-        // Create empty.txt inside step_solutions with the same ref_id content
-        await fs.writeFile(
-          path.join(stepSolutionsPath, 'empty.txt'),
-          item.ref_id || '',
-          'utf-8'
-        );
+        if (folderExists) {
+          // Folder exists - only update empty.txt files
+          await fs.writeFile(
+            path.join(itemFolderPath, 'empty.txt'),
+            item.ref_id || '',
+            'utf-8'
+          );
+          filesCreated.push('empty.txt');
 
-        filesCreated.push('step_solutions/empty.txt');
+          // Update step_solutions/empty.txt (create folder if needed)
+          const stepSolutionsPath = path.join(itemFolderPath, 'step_solutions');
+          await fs.mkdir(stepSolutionsPath, { recursive: true });
+          await fs.writeFile(
+            path.join(stepSolutionsPath, 'empty.txt'),
+            item.ref_id || '',
+            'utf-8'
+          );
+          filesCreated.push('step_solutions/empty.txt');
+        } else {
+          // Folder doesn't exist - create everything
+          await fs.mkdir(itemFolderPath, { recursive: true });
+
+          // Create empty.txt with the lesson_item's ref_id
+          await fs.writeFile(
+            path.join(itemFolderPath, 'empty.txt'),
+            item.ref_id || '',
+            'utf-8'
+          );
+
+          // Create problem_statement.txt with the problem_statement field
+          await fs.writeFile(
+            path.join(itemFolderPath, 'problem_statement.txt'),
+            item.problem_statement || '',
+            'utf-8'
+          );
+
+          // Create solution_context.txt with the solution_context field
+          await fs.writeFile(
+            path.join(itemFolderPath, 'solution_context.txt'),
+            item.solution_context || '',
+            'utf-8'
+          );
+
+          filesCreated.push('empty.txt', 'problem_statement.txt', 'solution_context.txt');
+
+          // Download visual.png if visual_path exists in the JSON
+          const visualPath = item.question_solution_item_json?.visual_path;
+          if (visualPath && typeof visualPath === 'string' && visualPath.trim()) {
+            const visualDestPath = path.join(itemFolderPath, 'visual.png');
+            const downloaded = await downloadImage(visualPath.trim(), visualDestPath);
+            if (downloaded) {
+              filesCreated.push('visual.png');
+            }
+          }
+
+          // Create step_solutions subfolder
+          const stepSolutionsPath = path.join(itemFolderPath, 'step_solutions');
+          await fs.mkdir(stepSolutionsPath, { recursive: true });
+
+          // Create empty.txt inside step_solutions with the same ref_id content
+          await fs.writeFile(
+            path.join(stepSolutionsPath, 'empty.txt'),
+            item.ref_id || '',
+            'utf-8'
+          );
+
+          filesCreated.push('step_solutions/empty.txt');
+        }
 
         createdFolders.push({
           folder: itemFolderName,
@@ -363,6 +394,7 @@ router.post('/create-folders', asyncHandler(async (req, res) => {
           questionLabel,
           lessonName: lesson.name,
           files: filesCreated,
+          updated: folderExists,
         });
 
         itemsCreated++;
