@@ -888,27 +888,35 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
                         </div>
                         {/* Row 2: Range and Section Names */}
                         <div className="flex items-center gap-2">
-                          <div className="w-20">
+                          <div className="w-32">
                             <label className="block text-xs text-gray-500 mb-1">Start</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max={editedItems.length}
+                            <select
                               value={config.start}
                               onChange={(e) => handleRangeConfigChange(index, 'start', e.target.value)}
                               className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
-                            />
+                            >
+                              <option value="">Select</option>
+                              {editedItems.map((item, idx) => (
+                                <option key={idx} value={idx + 1}>
+                                  Q{item.question_label || idx + 1}
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div className="w-20">
+                          <div className="w-32">
                             <label className="block text-xs text-gray-500 mb-1">End</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max={editedItems.length}
+                            <select
                               value={config.end}
                               onChange={(e) => handleRangeConfigChange(index, 'end', e.target.value)}
                               className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-green-500"
-                            />
+                            >
+                              <option value="">Select</option>
+                              {editedItems.map((item, idx) => (
+                                <option key={idx} value={idx + 1}>
+                                  Q{item.question_label || idx + 1}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                           <div className="flex-1">
                             <label className="block text-xs text-gray-500 mb-1">Parent Section Name</label>
@@ -931,6 +939,15 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
                             />
                           </div>
                         </div>
+                        {/* Range Summary */}
+                        {config.start && config.end && (
+                          <div className="mt-2 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded">
+                            Range: <span className="font-medium text-green-700">Q{editedItems[parseInt(config.start, 10) - 1]?.question_label || config.start}</span>
+                            {' → '}
+                            <span className="font-medium text-green-700">Q{editedItems[parseInt(config.end, 10) - 1]?.question_label || config.end}</span>
+                            {' '}({parseInt(config.end, 10) - parseInt(config.start, 10) + 1} items)
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
