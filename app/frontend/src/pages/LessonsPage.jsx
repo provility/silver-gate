@@ -293,7 +293,13 @@ export default function LessonsPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 max-w-xs">
-                      <span className="text-sm text-gray-600 truncate" title={lesson.common_parent_section_name}>{lesson.common_parent_section_name || '-'}</span>
+                      <span className="text-sm text-gray-600 truncate" title={lesson.common_parent_section_name}>
+                        {lesson.common_parent_section_name
+                          ? lesson.common_parent_section_name.length > 15
+                            ? lesson.common_parent_section_name.substring(0, 15) + '...'
+                            : lesson.common_parent_section_name
+                          : '-'}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="text-sm text-gray-600">{lesson.question_range || '-'}</span>
