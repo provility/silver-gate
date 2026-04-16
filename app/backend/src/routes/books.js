@@ -21,20 +21,20 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // Create book
 router.post('/', asyncHandler(async (req, res) => {
-  const { name, display_name, description, source_id } = req.body;
+  const { name, display_name, description, source_id, ref_id } = req.body;
 
   if (!name) {
     return res.status(400).json({ success: false, error: 'Name is required' });
   }
 
-  const book = await bookService.create({ name, display_name, description, source_id });
+  const book = await bookService.create({ name, display_name, description, source_id, ref_id });
   res.status(201).json({ success: true, data: book });
 }));
 
 // Update book
 router.put('/:id', asyncHandler(async (req, res) => {
-  const { name, display_name, description } = req.body;
-  const book = await bookService.update(req.params.id, { name, display_name, description });
+  const { name, display_name, description, ref_id } = req.body;
+  const book = await bookService.update(req.params.id, { name, display_name, description, ref_id });
   res.json({ success: true, data: book });
 }));
 

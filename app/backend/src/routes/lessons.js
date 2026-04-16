@@ -227,6 +227,38 @@ router.post('/', asyncHandler(async (req, res) => {
   }
 }));
 
+// Create an empty lesson (no lesson_items, no question/solution sets)
+router.post('/empty', asyncHandler(async (req, res) => {
+  const { name, book_id, chapter_id, common_parent_section_name, parent_section_name, lesson_item_count, question_type } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Lesson name is required',
+    });
+  }
+
+  try {
+    const lesson = await lessonsService.createEmpty({
+      name,
+      book_id: book_id || null,
+      chapter_id: chapter_id || null,
+      common_parent_section_name,
+      parent_section_name,
+      lesson_item_count: lesson_item_count ? parseInt(lesson_item_count, 10) : null,
+      question_type: question_type || 'OTHER',
+    });
+
+    res.status(201).json({ success: true, data: lesson });
+  } catch (error) {
+    console.error('Error creating empty lesson:', error);
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}));
+
 // Update a lesson (name only)
 router.put('/:id', asyncHandler(async (req, res) => {
   const { name } = req.body;

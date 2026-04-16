@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { BookOpen, Filter, Eye, Trash2, Calendar, FileQuestion, CheckCircle, Plus, FolderOpen, X, Loader2, CheckCircle2, AlertCircle, Square, CheckSquare } from 'lucide-react';
 import LessonModal from '../components/LessonModal';
 import PrepareLessonModal from '../components/PrepareLessonModal';
+import CreateLessonModal from '../components/CreateLessonModal';
 
 export default function LessonsPage() {
   const queryClient = useQueryClient();
@@ -15,6 +16,7 @@ export default function LessonsPage() {
   // State for viewing/editing
   const [viewingLesson, setViewingLesson] = useState(null);
   const [showPrepareModal, setShowPrepareModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // State for multi-selection
   const [selectedLessonIds, setSelectedLessonIds] = useState(new Set());
@@ -142,6 +144,13 @@ export default function LessonsPage() {
           >
             <Plus className="w-5 h-5" />
             Prepare Lesson
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            Create Lesson
           </button>
           <button
             onClick={() => {
@@ -376,6 +385,22 @@ export default function LessonsPage() {
       <PrepareLessonModal
         isOpen={showPrepareModal}
         onClose={() => setShowPrepareModal(false)}
+      />
+
+      {/* Create Lesson Modal */}
+      <CreateLessonModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        bookId={selectedBookId}
+        chapterId={selectedChapterId}
+        bookName={(() => {
+          const b = books?.data?.find((x) => x.id === selectedBookId);
+          return b ? (b.display_name || b.name) : '';
+        })()}
+        chapterName={(() => {
+          const c = chapters?.data?.find((x) => x.id === selectedChapterId);
+          return c ? (c.display_name || c.name) : '';
+        })()}
       />
 
       {/* Create Folders Modal (for multiple lessons) */}

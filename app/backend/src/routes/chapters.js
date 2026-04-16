@@ -28,7 +28,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // Create chapter
 router.post('/', asyncHandler(async (req, res) => {
-  const { name, display_name, book_id, chapter_number, position, source_id } = req.body;
+  const { name, display_name, book_id, chapter_number, position, source_id, ref_id } = req.body;
 
   if (!name || !book_id) {
     return res.status(400).json({ success: false, error: 'Name and book_id are required' });
@@ -41,18 +41,20 @@ router.post('/', asyncHandler(async (req, res) => {
     chapter_number,
     position,
     source_id,
+    ref_id,
   });
   res.status(201).json({ success: true, data: chapter });
 }));
 
 // Update chapter
 router.put('/:id', asyncHandler(async (req, res) => {
-  const { name, display_name, chapter_number, position } = req.body;
+  const { name, display_name, chapter_number, position, ref_id } = req.body;
   const chapter = await chapterService.update(req.params.id, {
     name,
     display_name,
     chapter_number,
     position,
+    ref_id,
   });
   res.json({ success: true, data: chapter });
 }));

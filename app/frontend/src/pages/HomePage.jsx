@@ -228,16 +228,23 @@ function BooksTab() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['books'] }),
   });
 
-  const openCreate = () => { setEditingBook(null); setFormData({ name: '', display_name: '', description: '' }); setShowModal(true); };
-  const openEdit = (book) => { setEditingBook(book); setFormData({ name: book.name, display_name: book.display_name || '', description: book.description || '' }); setShowModal(true); };
-  const closeModal = () => { setShowModal(false); setEditingBook(null); setFormData({ name: '', display_name: '', description: '' }); };
+  const openCreate = () => { setEditingBook(null); setFormData({ name: '', display_name: '', description: '', ref_id: '' }); setShowModal(true); };
+  const openEdit = (book) => { setEditingBook(book); setFormData({ name: book.name, display_name: book.display_name || '', description: book.description || '', ref_id: book.ref_id || '' }); setShowModal(true); };
+  const closeModal = () => { setShowModal(false); setEditingBook(null); setFormData({ name: '', display_name: '', description: '', ref_id: '' }); };
 
   const handleSubmit = () => {
     if (!formData.name.trim()) return;
+    const payload = {
+      name: formData.name,
+      display_name: formData.display_name,
+      description: formData.description,
+    };
+    const trimmedRefId = formData.ref_id.trim();
+    if (trimmedRefId) payload.ref_id = trimmedRefId;
     if (editingBook) {
-      updateMutation.mutate({ id: editingBook.id, data: formData });
+      updateMutation.mutate({ id: editingBook.id, data: payload });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate(payload);
     }
   };
 
@@ -295,6 +302,16 @@ function BooksTab() {
                 className="w-full px-4 py-2 border rounded-lg" placeholder="e.g., Mathematics Grade 10" />
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ref Id</label>
+              <input
+                type="text"
+                value={formData.ref_id}
+                onChange={(e) => setFormData({ ...formData, ref_id: e.target.value })}
+                className="w-full px-4 py-2 border rounded-lg"
+                placeholder="Optional — auto-generated if empty"
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
               <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="w-full px-4 py-2 border rounded-lg" rows={2} placeholder="Optional description" />
@@ -347,17 +364,20 @@ function ChaptersTab() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['chapters'] }),
   });
 
-  const openCreate = () => { setEditingChapter(null); setFormData({ name: '', display_name: '', chapter_number: '' }); setShowModal(true); };
-  const openEdit = (ch) => { setEditingChapter(ch); setFormData({ name: ch.name, display_name: ch.display_name || '', chapter_number: ch.chapter_number || '' }); setShowModal(true); };
+  const openCreate = () => { setEditingChapter(null); setFormData({ name: '', display_name: '', chapter_number: '', ref_id: '' }); setShowModal(true); };
+  const openEdit = (ch) => { setEditingChapter(ch); setFormData({ name: ch.name, display_name: ch.display_name || '', chapter_number: ch.chapter_number || '', ref_id: ch.ref_id || '' }); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setEditingChapter(null); };
 
   const handleSubmit = () => {
     if (!formData.name.trim() || !selectedBookId) return;
+    const { ref_id, ...rest } = formData;
     const payload = {
-      ...formData,
+      ...rest,
       book_id: selectedBookId,
       chapter_number: formData.chapter_number ? parseInt(formData.chapter_number, 10) : null,
     };
+    const trimmedRefId = ref_id.trim();
+    if (trimmedRefId) payload.ref_id = trimmedRefId;
     if (editingChapter) {
       updateMutation.mutate({ id: editingChapter.id, data: payload });
     } else {
@@ -440,6 +460,16 @@ function ChaptersTab() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
               <input type="text" value={formData.display_name} onChange={(e) => setFormData({ ...formData, display_name: e.target.value })}
                 className="w-full px-4 py-2 border rounded-lg" placeholder="e.g., Algebra Basics" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ref Id</label>
+              <input
+                type="text"
+                value={formData.ref_id}
+                onChange={(e) => setFormData({ ...formData, ref_id: e.target.value })}
+                className="w-full px-4 py-2 border rounded-lg"
+                placeholder="Optional — auto-generated if empty"
+              />
             </div>
           </div>
           <div className="flex justify-end gap-3 mt-6">

@@ -523,6 +523,50 @@ export const lessonsService = {
   },
 
   /**
+   * Create an empty lesson (no lesson_items, no question/solution sets required).
+   * Used by the standalone "Create Lesson" flow that only captures metadata.
+   */
+  async createEmpty({ name, book_id, chapter_id, common_parent_section_name, parent_section_name, lesson_item_count, question_type = 'OTHER' }) {
+    if (!name || !name.trim()) {
+      throw new Error('Lesson name is required');
+    }
+
+    // Determine next display_order for the chapter (if provided)
+    let display_order = null;
+    if (chapter_id) {
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('display_order')
+        .eq('chapter_id', chapter_id)
+        .not('display_order', 'is', null)
+        .order('display_order', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+      display_order = (!data || data.length === 0 || data[0].display_order === null) ? 1 : data[0].display_order + 1;
+    }
+
+    const { data: lesson, error: lessonError } = await supabase
+      .from('lessons')
+      .insert({
+        name: name.trim(),
+        common_parent_section_name: common_parent_section_name?.trim() || null,
+        parent_section_name: parent_section_name?.trim() || null,
+        book_id: book_id || null,
+        chapter_id: chapter_id || null,
+        display_order,
+        toc_output_json: { toc_question_items: [] },
+        ref_id: generateMongoId(),
+      })
+      .select()
+      .single();
+
+    if (lessonError) throw lessonError;
+
+    return await this.findById(lesson.id);
+  },
+
+  /**
    * Update a lesson (name only)
    */
   async update(id, updateData) {
