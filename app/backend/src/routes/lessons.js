@@ -227,6 +227,58 @@ router.post('/', asyncHandler(async (req, res) => {
   }
 }));
 
+// Prepare items for append flow (question set required, solution set optional)
+router.post('/prepare-items', asyncHandler(async (req, res) => {
+  const { question_set_id, solution_set_id } = req.body;
+
+  if (!question_set_id) {
+    return res.status(400).json({
+      success: false,
+      error: 'question_set_id is required',
+    });
+  }
+
+  try {
+    const data = await lessonsService.prepareItems({
+      question_set_id,
+      solution_set_id: solution_set_id || null,
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Error preparing items:', error);
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}));
+
+// Append items to an existing lesson
+router.post('/:id/items', asyncHandler(async (req, res) => {
+  const { items, question_type } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'items must be a non-empty array',
+    });
+  }
+
+  try {
+    const lesson = await lessonsService.appendItems(req.params.id, {
+      items,
+      question_type: question_type || 'OTHER',
+    });
+    res.status(201).json({ success: true, data: lesson });
+  } catch (error) {
+    console.error('Error appending items:', error);
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}));
+
 // Create an empty lesson (no lesson_items, no question/solution sets)
 router.post('/empty', asyncHandler(async (req, res) => {
   const { name, book_id, chapter_id, common_parent_section_name, parent_section_name, lesson_item_count, question_type } = req.body;

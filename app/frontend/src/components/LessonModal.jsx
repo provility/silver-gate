@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { BookOpen, X, Save, Edit2, FileQuestion, CheckCircle, Code, Eye, Trash2 } from 'lucide-react';
+import { BookOpen, X, Save, Edit2, FileQuestion, CheckCircle, Code, Eye, Trash2, Plus } from 'lucide-react';
 import QuestionText from './QuestionText';
+import AddLessonItemsModal from './AddLessonItemsModal';
 
 export default function LessonModal({ lesson, onClose }) {
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [showJsonView, setShowJsonView] = useState(false);
+  const [showAddItems, setShowAddItems] = useState(false);
   const [editedName, setEditedName] = useState(lesson.name);
   const [editedItems, setEditedItems] = useState(
     lesson.lesson_items || []
@@ -367,14 +369,29 @@ export default function LessonModal({ lesson, onClose }) {
               </div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowAddItems(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Lesson Items
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
+
+      <AddLessonItemsModal
+        isOpen={showAddItems}
+        onClose={() => setShowAddItems(false)}
+        lesson={lesson}
+      />
     </div>
   );
 }

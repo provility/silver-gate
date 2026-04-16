@@ -523,6 +523,196 @@ export const lessonsService = {
   },
 
   /**
+   * Prepare items for appending to an existing lesson.
+   * Accepts a required `question_set_id` and an optional `solution_set_id`.
+   * When the solution set is omitted, items are returned from the question set only.
+   */
+  async prepareItems({ question_set_id, solution_set_id }) {
+    const questionSet = await questionExtractionService.findById(question_set_id);
+    if (!questionSet) {
+      throw new Error('Question set not found');
+    }
+
+    let solutionSet = null;
+    if (solution_set_id) {
+      solutionSet = await solutionExtractionService.findById(solution_set_id);
+      if (!solutionSet) {
+        throw new Error('Solution set not found');
+      }
+    }
+
+    const questions = questionSet.questions?.questions || [];
+    const solutions = solutionSet?.solutions?.solutions || [];
+
+    const solutionsMap = new Map();
+    solutions.forEach((solution) => {
+      if (solution.question_label) {
+        solutionsMap.set(String(solution.question_label), solution);
+      }
+    });
+
+    const mergedItems = questions.map((question) => {
+      const questionLabel = String(question.question_label || '');
+      const matchingSolution = solutionsMap.get(questionLabel);
+
+      const item = {
+        question_label: question.question_label,
+        text: question.text,
+        choices: question.choices || [],
+        has_solution: !!matchingSolution,
+      };
+
+      if (matchingSolution) {
+        if (matchingSolution.answer_key) item.answer_key = matchingSolution.answer_key;
+        if (matchingSolution.worked_solution) item.worked_solution = matchingSolution.worked_solution;
+        if (matchingSolution.explanation) item.explanation = matchingSolution.explanation;
+      }
+
+      return item;
+    });
+
+    return {
+      question_set: { id: questionSet.id, name: questionSet.name },
+      solution_set: solutionSet ? { id: solutionSet.id, name: solutionSet.name } : null,
+      summary: {
+        total_questions: questions.length,
+        total_solutions: solutions.length,
+        matched: mergedItems.filter((i) => i.has_solution).length,
+      },
+      items: mergedItems,
+    };
+  },
+
+  /**
+   * Append selected items to an existing lesson.
+   * Inserts new lesson_items rows at positions continuing after the current max.
+   */
+  async appendItems(lessonId, { items, question_type = 'OTHER' }) {
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new Error('items must be a non-empty array');
+    }
+
+    const { data: lesson, error: lessonError } = await supabase
+      .from('lessons')
+      .select('id, toc_output_json')
+      .eq('id', lessonId)
+      .single();
+
+    if (lessonError || !lesson) {
+      throw new Error('Lesson not found');
+    }
+
+    const { data: existing, error: existingError } = await supabase
+      .from('lesson_items')
+      .select('position')
+      .eq('lesson_id', lessonId)
+      .order('position', { ascending: false })
+      .limit(1);
+
+    if (existingError) throw existingError;
+
+    const startPosition = existing && existing.length > 0 && existing[0].position !== null
+      ? existing[0].position + 1
+      : 0;
+
+    const extractChoiceLabel = (choiceText, fallbackIndex) => {
+      const patterns = [
+        /^\$\(([a-zA-Z])\)\$\s*/,
+        /^\(([a-zA-Z])\)\s*/,
+        /^\$([a-zA-Z])\$\s*/,
+        /^([a-zA-Z])\.\s*/,
+        /^([a-zA-Z])\)\s*/,
+      ];
+      for (const pattern of patterns) {
+        const match = choiceText.match(pattern);
+        if (match && match[1]) return match[1].toLowerCase();
+      }
+      return String.fromCharCode(97 + fallbackIndex);
+    };
+
+    const cleanChoiceText = (choiceText) =>
+      choiceText
+        .replace(/^\$\([a-zA-Z]\)\$\s*/, '')
+        .replace(/^\([a-zA-Z]\)\s*/, '')
+        .replace(/^\$[a-zA-Z]\$\s*/, '')
+        .replace(/^[a-zA-Z]\.\s*/, '')
+        .replace(/^[a-zA-Z]\)\s*/, '')
+        .trim();
+
+    const newRecords = items.map((item, idx) => {
+      const position = startPosition + idx;
+      let problemStatement = item.text || '';
+      if (item.choices && item.choices.length > 0) {
+        problemStatement += ' $\\\\$ ' + item.choices.join(' $\\hspace{2em}$');
+      }
+
+      let solutionContext = '';
+      if (item.answer_key) solutionContext = `Answer: ${item.answer_key}`;
+      if (item.worked_solution) {
+        solutionContext += (solutionContext ? '\n\n' : '') + item.worked_solution;
+      }
+
+      return {
+        lesson_id: lessonId,
+        question_label: item.question_label,
+        problem_statement: problemStatement,
+        solution_context: solutionContext,
+        question_solution_item_json: item,
+        position,
+        ref_id: generateMongoId(),
+        question_type,
+        index: String(position + 1),
+      };
+    });
+
+    const { error: insertError } = await supabase
+      .from('lesson_items')
+      .insert(newRecords);
+
+    if (insertError) throw insertError;
+
+    // Rebuild the full toc_output_json from ALL current lesson_items (existing + newly inserted)
+    // so the list stays in sync with lesson_items at all times.
+    const { data: allItems, error: allItemsError } = await supabase
+      .from('lesson_items')
+      .select('position, question_label, question_solution_item_json')
+      .eq('lesson_id', lessonId)
+      .order('position', { ascending: true });
+
+    if (allItemsError) throw allItemsError;
+
+    const tocQuestionItems = (allItems || []).map((row, index) => {
+      const source = row.question_solution_item_json || {};
+      const questionId = String(index + 1);
+      const baseItem = {
+        id: questionId,
+        question: source.text || '',
+        question_label: String(row.question_label ?? source.question_label ?? questionId),
+      };
+      const choices = source.choices || [];
+      if (choices.length > 0) {
+        baseItem.choices = choices.map((choice, choiceIndex) => ({
+          id: `${questionId}.${choiceIndex + 1}`,
+          question: cleanChoiceText(choice),
+          question_label: extractChoiceLabel(choice, choiceIndex),
+        }));
+      } else {
+        baseItem.sub_questions = [];
+      }
+      return baseItem;
+    });
+
+    const { error: updateError } = await supabase
+      .from('lessons')
+      .update({ toc_output_json: { toc_question_items: tocQuestionItems } })
+      .eq('id', lessonId);
+
+    if (updateError) throw updateError;
+
+    return await this.findById(lessonId);
+  },
+
+  /**
    * Create an empty lesson (no lesson_items, no question/solution sets required).
    * Used by the standalone "Create Lesson" flow that only captures metadata.
    */
