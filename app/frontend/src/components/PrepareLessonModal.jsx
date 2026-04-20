@@ -1132,7 +1132,7 @@ export default function PrepareLessonModal({ isOpen, onClose }) {
                 <option value="">All Chapters</option>
                 {chapters?.data?.map((chapter) => (
                   <option key={chapter.id} value={chapter.id}>
-                    {chapter.display_name || chapter.name}
+                    {chapter.chapter_number ? `Ch ${chapter.chapter_number}: ` : ''}{chapter.display_name || chapter.name}
                   </option>
                 ))}
               </select>

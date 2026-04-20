@@ -242,7 +242,7 @@ export default function ImportQuestionsModal({ isOpen, onClose, onImport, books,
                 <option value="">Select Chapter</option>
                 {chapters?.map((chapter) => (
                   <option key={chapter.id} value={chapter.id}>
-                    {chapter.display_name || chapter.name}
+                    {chapter.chapter_number ? `Ch ${chapter.chapter_number}: ` : ''}{chapter.display_name || chapter.name}
                   </option>
                 ))}
               </select>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { BookOpen, Filter, Eye, Trash2, Calendar, FileQuestion, CheckCircle, Plus, FolderOpen, X, Loader2, CheckCircle2, AlertCircle, Square, CheckSquare } from 'lucide-react';
+import { BookOpen, Filter, Eye, Trash2, Calendar, FileQuestion, CheckCircle, Plus, FolderOpen, X, Loader2, CheckCircle2, AlertCircle, Square, CheckSquare, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import LessonModal from '../components/LessonModal';
 import PrepareLessonModal from '../components/PrepareLessonModal';
 import CreateLessonModal from '../components/CreateLessonModal';
@@ -17,6 +17,26 @@ export default function LessonsPage() {
   const [viewingLesson, setViewingLesson] = useState(null);
   const [showPrepareModal, setShowPrepareModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // State for sorting
+  const [sortField, setSortField] = useState('created_at');
+  const [sortDir, setSortDir] = useState('desc');
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 text-gray-300" />;
+    return sortDir === 'asc'
+      ? <ArrowUp className="w-3 h-3 ml-1 text-indigo-600" />
+      : <ArrowDown className="w-3 h-3 ml-1 text-indigo-600" />;
+  };
 
   // State for multi-selection
   const [selectedLessonIds, setSelectedLessonIds] = useState(new Set());
@@ -122,7 +142,39 @@ export default function LessonsPage() {
   };
 
   const sortedLessons = lessons?.data
-    ? [...lessons.data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    ? [...lessons.data].sort((a, b) => {
+        let aVal, bVal;
+        switch (sortField) {
+          case 'name':
+            aVal = (a.name || '').toLowerCase();
+            bVal = (b.name || '').toLowerCase();
+            break;
+          case 'section':
+            aVal = (a.common_parent_section_name || '').toLowerCase();
+            bVal = (b.common_parent_section_name || '').toLowerCase();
+            break;
+          case 'range':
+            aVal = a.question_range || '';
+            bVal = b.question_range || '';
+            break;
+          case 'order':
+            aVal = a.display_order ?? -1;
+            bVal = b.display_order ?? -1;
+            break;
+          case 'items':
+            aVal = a.lesson_items?.length || 0;
+            bVal = b.lesson_items?.length || 0;
+            break;
+          case 'created_at':
+          default:
+            aVal = new Date(a.created_at).getTime();
+            bVal = new Date(b.created_at).getTime();
+            break;
+        }
+        if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+      })
     : [];
 
   const getLessonCount = (lesson) => {
@@ -201,7 +253,7 @@ export default function LessonsPage() {
             <option value="">All Chapters</option>
             {chapters?.data?.map((chapter) => (
               <option key={chapter.id} value={chapter.id}>
-                {chapter.display_name || chapter.name}
+                {chapter.chapter_number ? `Ch ${chapter.chapter_number}: ` : ''}{chapter.display_name || chapter.name}
               </option>
             ))}
           </select>
@@ -250,26 +302,26 @@ export default function LessonsPage() {
                       )}
                     </button>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Name
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('name')}>
+                    <span className="flex items-center">Name<SortIcon field="name" /></span>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Section
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('section')}>
+                    <span className="flex items-center">Section<SortIcon field="section" /></span>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Range
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('range')}>
+                    <span className="flex items-center">Range<SortIcon field="range" /></span>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Order
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('order')}>
+                    <span className="flex items-center">Order<SortIcon field="order" /></span>
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Items
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('items')}>
+                    <span className="flex items-center">Items<SortIcon field="items" /></span>
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Source Sets
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Created
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort('created_at')}>
+                    <span className="flex items-center">Created<SortIcon field="created_at" /></span>
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
