@@ -49,6 +49,7 @@ export default function ScannedItemsPage() {
     name: '',
     type: 'Question Bank',
     provider: 'llamaparse',
+    numberOfQuestions: '',
   });
 
   // Extract solutions modal state
@@ -301,6 +302,7 @@ export default function ScannedItemsPage() {
       name: extractFormData.name,
       type: extractFormData.type,
       provider: extractFormData.provider,
+      numberOfQuestions: extractFormData.numberOfQuestions === '' ? null : Number(extractFormData.numberOfQuestions),
     });
     setShowExtractModal(false);
   };
@@ -1121,6 +1123,26 @@ export default function ScannedItemsPage() {
                     ? 'Uses Google Gemini AI for extraction (alternative when LlamaParse limit is reached)'
                     : 'Default extraction provider using LlamaParse API'}
                 </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Number of Questions
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={extractFormData.numberOfQuestions}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '' || /^\d+$/.test(val)) {
+                      setExtractFormData({ ...extractFormData, numberOfQuestions: val });
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Optional — leave blank for no limit"
+                />
               </div>
 
               <div className="bg-gray-50 p-3 rounded-lg">

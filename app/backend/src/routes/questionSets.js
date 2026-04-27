@@ -98,7 +98,7 @@ router.get('/:id/status', asyncHandler(async (req, res) => {
 
 // Create question set and start extraction
 router.post('/extract', asyncHandler(async (req, res) => {
-  const { item_ids, name, type, provider } = req.body;
+  const { item_ids, name, type, provider, numberOfQuestions } = req.body;
 
   if (!item_ids || !Array.isArray(item_ids) || item_ids.length === 0) {
     return res.status(400).json({
@@ -126,13 +126,28 @@ router.post('/extract', asyncHandler(async (req, res) => {
     });
   }
 
+  // Validate numberOfQuestions if provided
+  let normalizedNumberOfQuestions = null;
+  if (numberOfQuestions !== undefined && numberOfQuestions !== null && numberOfQuestions !== '') {
+    const parsed = Number(numberOfQuestions);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'numberOfQuestions must be a positive integer',
+      });
+    }
+    normalizedNumberOfQuestions = parsed;
+  }
+
   // Create the question set
   const questionSet = await questionExtractionService.createQuestionSet(item_ids, { name, type });
 
   // Start extraction asynchronously (don't wait)
-  questionExtractionService.extractQuestions(questionSet.id, extractionProvider).catch((err) => {
-    console.error('Extraction error:', err);
-  });
+  questionExtractionService
+    .extractQuestions(questionSet.id, extractionProvider, normalizedNumberOfQuestions)
+    .catch((err) => {
+      console.error('Extraction error:', err);
+    });
 
   res.status(201).json({ success: true, data: questionSet });
 }));

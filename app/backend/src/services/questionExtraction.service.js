@@ -141,9 +141,14 @@ MANDATORY RULES:
 `,
 };
 
-// Helper to get parsing instructions for a type
-const getParsingInstructions = (type) => {
-  return PARSING_INSTRUCTIONS[type] || PARSING_INSTRUCTIONS['Question Bank'];
+// Helper to get parsing instructions for a type, optionally augmented with a target question count rule
+const getParsingInstructions = (type, numberOfQuestions = null) => {
+  const base = PARSING_INSTRUCTIONS[type] || PARSING_INSTRUCTIONS['Question Bank'];
+  if (numberOfQuestions === null || numberOfQuestions === undefined) {
+    return base;
+  }
+  const targetRule = `- TARGET QUESTION COUNT: First, scan the entire document and count how many distinct questions are present. Then extract exactly ${numberOfQuestions} questions from the document. If the document contains MORE than ${numberOfQuestions} questions, extract the FIRST ${numberOfQuestions} questions in the order they appear. If the document contains FEWER than ${numberOfQuestions} questions, extract ALL available questions (do not fabricate real questions to reach the target). If after extraction the total number of questions is still less than ${numberOfQuestions}, pad the "questions" array with placeholder entries until the array length equals ${numberOfQuestions}. Each placeholder MUST use this exact shape:\n  {\n    "question_label": "<next sequential number>",\n    "text": "TODO...",\n    "choices": []\n  }`;
+  return `${base.trimEnd()}\n${targetRule}\n`;
 };
 
 export const questionExtractionService = {
@@ -207,7 +212,7 @@ export const questionExtractionService = {
    * @param {string} provider - Extraction provider ('llamaparse' or 'gemini')
    * @returns {Promise<object>} - Updated question set with extracted questions
    */
-  async extractQuestions(questionSetId, provider = EXTRACTION_PROVIDERS.LLAMAPARSE) {
+  async extractQuestions(questionSetId, provider = EXTRACTION_PROVIDERS.LLAMAPARSE, numberOfQuestions = null) {
     try {
       // Update status to processing
       await this.updateStatus(questionSetId, 'processing');
@@ -229,12 +234,12 @@ export const questionExtractionService = {
       if (provider === EXTRACTION_PROVIDERS.GEMINI) {
         // Use Gemini for extraction
         console.log(`[EXTRACT] Using Gemini AI for extraction`);
-        rawResult = await this.extractWithGemini(combinedContent, sourceType);
+        rawResult = await this.extractWithGemini(combinedContent, sourceType, numberOfQuestions);
         console.log(`[EXTRACT] Gemini raw result size: ${Math.round(rawResult.length / 1024)}KB`);
       } else {
         // Use LlamaParse for extraction (default)
         console.log(`[EXTRACT] Using LlamaParse for extraction`);
-        const jobId = await this.submitToLlamaParse(combinedContent, sourceType);
+        const jobId = await this.submitToLlamaParse(combinedContent, sourceType, numberOfQuestions);
 
         // Store the job ID
         await supabase
@@ -330,13 +335,13 @@ export const questionExtractionService = {
    * @param {string} sourceType - Source type ('Question Bank' or 'Academic Book')
    * @returns {Promise<string>} - Job ID from LlamaParse
    */
-  async submitToLlamaParse(content, sourceType = 'Question Bank') {
+  async submitToLlamaParse(content, sourceType = 'Question Bank', numberOfQuestions = null) {
     // Create a text file blob from the combined content
     const blob = new Blob([content], { type: 'text/plain' });
 
     // Get parsing instructions based on source type
-    const parsingInstructions = getParsingInstructions(sourceType);
-    console.log(`[EXTRACT] Using parsing instructions for type: ${sourceType}`);
+    const parsingInstructions = getParsingInstructions(sourceType, numberOfQuestions);
+    console.log(`[EXTRACT] Using parsing instructions for type: ${sourceType}${numberOfQuestions ? ` (target count: ${numberOfQuestions})` : ''}`);
 
     const formData = new FormData();
     formData.append('file', blob, 'questions.txt');
@@ -424,12 +429,12 @@ export const questionExtractionService = {
    * @param {string} sourceType - Source type ('Question Bank' or 'Academic Book')
    * @returns {Promise<string>} - Extracted content with questions in JSON format
    */
-  async extractWithGemini(content, sourceType = 'Question Bank') {
+  async extractWithGemini(content, sourceType = 'Question Bank', numberOfQuestions = null) {
     if (!GEMINI_API_KEY) {
       throw new Error('Gemini API key not configured. Please set GOOGLE_API_KEY in environment variables.');
     }
 
-    const parsingInstructions = getParsingInstructions(sourceType);
+    const parsingInstructions = getParsingInstructions(sourceType, numberOfQuestions);
 
     // Split content into chunks if too large (Gemini has context limits)
     const MAX_CONTENT_LENGTH = 900000; // ~900KB to stay within limits
