@@ -329,7 +329,7 @@ export default function ScannedItemsPage() {
   };
 
   const canSelect = (item) => {
-    return item.latex_conversion_status === 'completed' && item.latex_doc;
+    return item.latex_conversion_status === 'completed';
   };
 
   // Check if item can be viewed as PDF
@@ -338,7 +338,7 @@ export default function ScannedItemsPage() {
     const itemData = item.item_data?.toLowerCase() || '';
     // Allow viewing if scan_type is pdf/email_attachment/file_upload, or if filename ends with .pdf
     return scanType === 'pdf' || scanType === 'email_attachment' || scanType === 'file_upload' ||
-           itemData.endsWith('.pdf') || item.content;
+           itemData.endsWith('.pdf');
   };
 
   // Get the PDF URL for viewing
@@ -394,9 +394,17 @@ export default function ScannedItemsPage() {
     }
   };
 
-  const handleViewLatex = (item) => {
-    setSelectedLatexItem(item);
+  const handleViewLatex = async (item) => {
+    // List view doesn't include latex_doc — fetch full row on demand.
     setLatexViewerOpen(true);
+    setSelectedLatexItem({ ...item, latex_doc: 'Loading LaTeX content…' });
+    try {
+      const res = await api.get(`/scanned-items/${item.id}`);
+      setSelectedLatexItem(res?.data || item);
+    } catch (err) {
+      console.error('Failed to load LaTeX content:', err);
+      setSelectedLatexItem({ ...item, latex_doc: 'Failed to load LaTeX content.' });
+    }
   };
 
   const hasActiveJob = activeJob?.data?.active_book_id && activeJob?.data?.active_chapter_id;
@@ -724,9 +732,9 @@ export default function ScannedItemsPage() {
                         )}
                         <button
                           onClick={() => handleViewLatex(item)}
-                          className={`${item.latex_doc ? 'text-green-500 hover:text-green-700' : 'text-gray-300 cursor-not-allowed'}`}
-                          title={item.latex_doc ? 'View LaTeX' : 'No LaTeX available'}
-                          disabled={!item.latex_doc}
+                          className={`${item.latex_conversion_status === 'completed' ? 'text-green-500 hover:text-green-700' : 'text-gray-300 cursor-not-allowed'}`}
+                          title={item.latex_conversion_status === 'completed' ? 'View LaTeX' : 'No LaTeX available'}
+                          disabled={item.latex_conversion_status !== 'completed'}
                         >
                           <Eye className="w-5 h-5" />
                         </button>

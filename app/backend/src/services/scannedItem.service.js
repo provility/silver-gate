@@ -7,14 +7,28 @@ export const scannedItemService = {
   async getAll(filters = {}) {
     console.log('[ScannedItems] getAll filters:', filters);
 
+    // List view: omit heavy columns (latex_doc, content) — fetched on-demand by id.
     let query = supabase
       .from('scanned_items')
       .select(`
-        *,
+        id,
+        book_id,
+        chapter_id,
+        item_type,
+        item_data,
+        scan_type,
+        status,
+        latex_conversion_status,
+        conversion_error,
+        mathpix_request_id,
+        metadata,
+        created_at,
+        updated_at,
         book:books(id, name, display_name),
         chapter:chapters(id, name, display_name, chapter_number)
       `)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     if (filters.bookId) {
       query = query.eq('book_id', filters.bookId);
