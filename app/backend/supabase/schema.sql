@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS scanned_items (
     status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'archived')),
     -- MathPix conversion fields
     latex_doc TEXT, -- Converted LaTeX document from MathPix
+    pre_extracted TEXT, -- LaTeX from MathPix annotated with <<<Q_START>>>...<<<Q_END>>> markers
+    pre_extracted_present BOOLEAN GENERATED ALWAYS AS (pre_extracted IS NOT NULL) STORED, -- list-view indicator
     latex_conversion_status VARCHAR(50) DEFAULT 'pending' CHECK (latex_conversion_status IN ('pending', 'processing', 'completed', 'failed')),
     conversion_error TEXT, -- Error message if conversion failed
     mathpix_request_id VARCHAR(255), -- MathPix API request ID for tracking

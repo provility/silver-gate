@@ -19,6 +19,7 @@ export const scannedItemService = {
         scan_type,
         status,
         latex_conversion_status,
+        pre_extracted_present,
         conversion_error,
         mathpix_request_id,
         metadata,

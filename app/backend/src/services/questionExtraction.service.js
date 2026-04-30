@@ -1,5 +1,6 @@
 import { supabase } from '../config/database.js';
 import { config } from '../config/index.js';
+import { Q_START_MARKER, Q_END_MARKER } from './preExtraction.service.js';
 
 const LLAMAPARSE_API_URL = config.llamaParse.apiUrl;
 const LLAMAPARSE_API_KEY = config.llamaParse.apiKey;
@@ -141,14 +142,124 @@ MANDATORY RULES:
 `,
 };
 
-// Helper to get parsing instructions for a type, optionally augmented with a target question count rule
-const getParsingInstructions = (type, numberOfQuestions = null) => {
+// Marker-mode parsing instruction. When the input has been pre-extracted with
+// boundary markers, this REPLACES the Question Bank / Academic Book base prompt
+// entirely — those base prompts assume natural-language question discovery and
+// their rules ("extract every question from 1 to N", "MUST extract exactly 4
+// choices", JSON examples without markers) actively conflict with the marker
+// flow and cause the per-page LLM calls to relabel/drop questions.
+const MARKER_PARSING_INSTRUCTIONS = `You are a structured-data extractor. The input is plaintext / LaTeX content where every question has been pre-wrapped with explicit boundary tokens. Your only job is to convert each marker pair into one JSON entry.
+
+THE MARKERS:
+- Question start: the literal 13-character token   ${Q_START_MARKER}
+- Question end:   the literal 11-character token   ${Q_END_MARKER}
+- Markers always come in matched pairs. They never nest.
+
+WHAT YOU MUST DO:
+1. Scan the input from start to end. Every time you encounter ${Q_START_MARKER}, capture everything up to the matching ${Q_END_MARKER} as ONE question block.
+2. For each question block, produce one entry in the "questions" array with three fields: question_label (string), text (string), choices (array of strings).
+3. Emit one entry PER block. If the input has 17 blocks visible to you, your "questions" array MUST have 17 entries. If it has 8 blocks visible to you, the array MUST have 8 entries. The number of entries equals the number of marker pairs, ALWAYS.
+
+LABELING (question_label):
+- Inside each block, the content typically begins with a number followed by a period and a space, like "1. " or "14. " or "20. ". Use that number, stripped of the period, as the question_label.
+  Example: block content "11. In the given figure, ... (D) 5:2"  →  question_label = "11"
+- These numbers are GLOBAL — they refer to the whole document, NOT to the position of the block in your current view. Always copy the number you literally see inside the block. NEVER renumber, NEVER reset to "1" because you think it's the first block.
+- If a block has NO leading number (rare; e.g. the block contains only a stray period or is otherwise malformed), use the string form of the block's 1-based ordinal in YOUR view (still emit it; do not skip).
+
+TEXT FIELD:
+- Take the full content between ${Q_START_MARKER} and ${Q_END_MARKER}.
+- Remove the leading "<number>. " prefix (so "11. In the given figure, ..." becomes "In the given figure, ...").
+- The text field is the question stem ONLY — everything UP TO the first MCQ choice line, if any. Preserve all LaTeX ($...$, $$...$$), special characters, and sub-parts like (i)/(ii)/(iii) or (a)/(b)/(c) that are part of the question wording (not separate MCQ choices).
+- Do NOT include the marker tokens in the text.
+
+CHOICES FIELD:
+- Detect MCQ choice lines inside the block. A choice line starts with one of: "(a)", "(b)", "(c)", "(d)" (lowercase) or "(A)", "(B)", "(C)", "(D)" (uppercase).
+- For each choice, push a string of the form "(a) <body>" / "(A) <body>" into the choices array, in the ORDER THEY APPEAR in the block (do not reorder them, even if they are out of alphabetical order in the source).
+- Preserve all LaTeX in choice bodies.
+- If a block has no MCQ choices, set choices to an empty array [].
+
+WHAT YOU MUST NOT DO:
+- DO NOT skip any block. Every ${Q_START_MARKER} you see must produce an entry.
+- DO NOT merge two blocks into one entry, or split one block into two entries.
+- DO NOT extract anything from text OUTSIDE the markers. Section headings (e.g. "\\section*{...}"), page noise, image links (![](...)), separator lines, and stray text between blocks are all NOISE and must be ignored.
+- DO NOT include the literal tokens ${Q_START_MARKER} or ${Q_END_MARKER} anywhere in your output.
+- DO NOT invent, fabricate, or pad with placeholder entries. The number of entries must equal the number of marker pairs you can see — no more, no less.
+- DO NOT renumber labels. Always use the number printed INSIDE the block.
+- DO NOT relabel using your own running counter unless a block truly has no leading number.
+
+OUTPUT FORMAT:
+- Return ONE and ONLY ONE JSON object of the form:
+  {
+    "questions": [
+      { "question_label": "1", "text": "...", "choices": ["(a) ...", "(b) ...", "(c) ...", "(d) ..."] },
+      { "question_label": "2", "text": "...", "choices": [] },
+      ...
+    ]
+  }
+- No markdown code fences. No commentary. No preamble. The response must start with { and end with }.
+
+EXAMPLE INPUT (a 3-block excerpt):
+\\section*{CH 6 MCQ}
+
+${Q_START_MARKER}
+1. In the given figure, $AB \\mid CD$. The length of OC is
+(a) $\\frac{15}{2}$ cm
+(b) $\\frac{10}{3}$ cm
+(c) $\\frac{6}{5}$ cm
+(d) $\\frac{3}{5}$ cm
+${Q_END_MARKER}
+
+${Q_START_MARKER}
+7. Which of the following is not the criterion for similarity of triangles?
+(A) AAA
+(B) SSS
+(C) SAS
+(D) RHS
+${Q_END_MARKER}
+
+${Q_START_MARKER}
+14. In the figure, $DE \\| BC$. Which is true?
+${Q_END_MARKER}
+
+EXAMPLE OUTPUT:
+{ "questions": [
+  { "question_label": "1", "text": "In the given figure, $AB \\mid CD$. The length of OC is", "choices": ["(a) $\\frac{15}{2}$ cm", "(b) $\\frac{10}{3}$ cm", "(c) $\\frac{6}{5}$ cm", "(d) $\\frac{3}{5}$ cm"] },
+  { "question_label": "7", "text": "Which of the following is not the criterion for similarity of triangles?", "choices": ["(A) AAA", "(B) SSS", "(C) SAS", "(D) RHS"] },
+  { "question_label": "14", "text": "In the figure, $DE \\| BC$. Which is true?", "choices": [] }
+] }
+
+FINAL CHECK BEFORE RESPONDING:
+- Count the ${Q_START_MARKER} occurrences in the input visible to you, call it K.
+- Count the entries in your "questions" array, call it N.
+- N MUST equal K. If they differ, you have made a mistake — fix it before responding.
+- Verify question_label values were copied from inside each block, not generated by your own counter.`;
+
+// Helper to get parsing instructions for a type, optionally augmented with
+// a target question count rule and/or a "markers present" rule.
+const getParsingInstructions = (type, numberOfQuestions = null, hasMarkers = false) => {
   const base = PARSING_INSTRUCTIONS[type] || PARSING_INSTRUCTIONS['Question Bank'];
+
+  // When markers are present, use the dedicated marker-mode prompt and ignore
+  // both the type-specific base prompt and the target-count rule. The base
+  // prompt's natural-language assumptions ("extract every question from 1 to N",
+  // "MUST extract exactly 4 choices", non-marker JSON examples) compete with
+  // the marker rule and have caused per-page LLM calls to relabel/drop entries.
+  if (hasMarkers) {
+    console.log(`[EXTRACT] ===== FINAL PARSING PROMPT (marker mode, type ignored, target ignored) =====`);
+    console.log(MARKER_PARSING_INSTRUCTIONS);
+    console.log(`[EXTRACT] ===== END PROMPT (length: ${MARKER_PARSING_INSTRUCTIONS.length}) =====`);
+    return MARKER_PARSING_INSTRUCTIONS;
+  }
+
   if (numberOfQuestions === null || numberOfQuestions === undefined) {
     return base;
   }
-  const targetRule = `- TARGET QUESTION COUNT: First, scan the entire document and count how many distinct questions are present. Then extract exactly ${numberOfQuestions} questions from the document. If the document contains MORE than ${numberOfQuestions} questions, extract the FIRST ${numberOfQuestions} questions in the order they appear. If the document contains FEWER than ${numberOfQuestions} questions, extract ALL available questions (do not fabricate real questions to reach the target). If after extraction the total number of questions is still less than ${numberOfQuestions}, pad the "questions" array with placeholder entries until the array length equals ${numberOfQuestions}. Each placeholder MUST use this exact shape:\n  {\n    "question_label": "<next sequential number>",\n    "text": "TODO...",\n    "choices": []\n  }`;
-  return `${base.trimEnd()}\n${targetRule}\n`;
+  const targetRule = `- KNOWN QUESTION COUNT (GROUND TRUTH): This document contains EXACTLY ${numberOfQuestions} questions. This number is a confirmed fact provided by the user — it is NOT an estimate, assumption, or guess. Treat it as absolute ground truth and do NOT second-guess it.\n- SOURCE NUMBERING IS UNRELIABLE — IGNORE IT: This input was produced by an OCR/Mathpix pipeline. The numeric labels in the source are MESSY and CANNOT BE TRUSTED:\n    * A question's number may appear BEFORE the question text (e.g. "5. Find ...").\n    * A question's number may appear AFTER the question text on a separate line (e.g. the question text, then a line containing only "7.").\n    * Numbers may be ORPHANED — a line containing only a digit followed by a period (e.g. "4.", "5.", "20.") with no associated question. These are noise from page layout. IGNORE them entirely; they are NOT questions.\n    * The numbering may JUMP, REPEAT, or be OUT OF ORDER (e.g. ..., 12, 13, 2, 14, ...). Do not treat such jumps as multiple questions.\n    * Some questions may have NO visible number at all.\n  Do NOT use any digit found in the source as the question_label. Do NOT try to "preserve" the original numbering.\n- HOW TO IDENTIFY A REAL QUESTION: A real question is a complete instruction or interrogative — sentences ending in "?", or starting with verbs like "Find", "Show", "Prove", "How many", "Which", "Determine", "Calculate", or describing a problem scenario followed by sub-parts (i)/(ii)/(iii) or (a)/(b)/(c). A bare number like "20." on its own line is NOT a question.\n- ASSIGN LABELS SEQUENTIALLY: Override the "question_label EXACTLY as shown" rule from above. Instead, assign question_label as a sequential string starting from "1": the first real question you find is "1", the second is "2", ..., up to "${numberOfQuestions}". This avoids being confused by the messy source numbering.\n- SINGLE JSON OBJECT ONLY: Your entire response MUST be ONE and ONLY ONE JSON object of the form { "questions": [...] }. Do NOT emit the JSON twice. Do NOT repeat the JSON object. Do NOT output multiple { "questions": [...] } blocks. Do NOT include the same questions in more than one block. Anything other than exactly one JSON object will be considered invalid output.\n- NO DUPLICATES: Each real question from the document must appear only ONCE. If you encounter content that looks similar to a question you already extracted (because of OCR repetition, page headers, or per-page processing), do NOT add it again.\n- HARD UPPER LIMIT: The "questions" array MUST contain AT MOST ${numberOfQuestions} entries. Never return more than ${numberOfQuestions} questions under any circumstances. If during extraction you reach ${numberOfQuestions} entries, STOP — anything that looks like further questions is noise (page headers, repeated content, footnotes, answer keys, orphan numbers) and must be ignored.\n- EXTRACTION ORDER: Extract questions strictly in the order they FIRST appear in the document, starting from the first real question and stopping when you have ${numberOfQuestions} entries or reach the end.\n- PADDING WHEN FEWER FOUND: If the document genuinely contains fewer than ${numberOfQuestions} real questions, do NOT fabricate or invent questions. Pad the "questions" array with placeholder entries until its length equals exactly ${numberOfQuestions}. Each placeholder MUST use this exact shape:\n  {\n    "question_label": "<next sequential number>",\n    "text": "TODO...",\n    "choices": []\n  }\n- MANDATORY FINAL CHECK: Before returning, verify all of the following:\n  1. There is exactly ONE { "questions": [...] } JSON object in your response (not two, not three).\n  2. The "questions" array length is EXACTLY ${numberOfQuestions} — never more, never less.\n  3. question_label values are sequential strings "1", "2", ..., "${numberOfQuestions}" with no gaps and no duplicates.\n  4. No orphan numeric lines (like "4.", "20.") were treated as questions.\n  If any check fails, fix the output before returning. Do not return invalid output.`;
+  const finalPrompt = `${base.trimEnd()}\n${targetRule}\n`;
+  console.log(`[EXTRACT] ===== FINAL PARSING PROMPT (type: ${type}, target: ${numberOfQuestions}, hasMarkers: false) =====`);
+  console.log(finalPrompt);
+  console.log(`[EXTRACT] ===== END PROMPT (length: ${finalPrompt.length}) =====`);
+  return finalPrompt;
 };
 
 export const questionExtractionService = {
@@ -227,6 +338,16 @@ export const questionExtractionService = {
       const combinedContent = await this.combineLatexContent(questionSet.source_item_ids);
       console.log(`[EXTRACT] Combined LaTeX content size: ${Math.round(combinedContent.length / 1024)}KB`);
 
+      // Detect whether any source item contributed pre-extracted content with question boundary markers.
+      const hasMarkers = combinedContent.includes(Q_START_MARKER) && combinedContent.includes(Q_END_MARKER);
+      if (hasMarkers) {
+        console.log(`[EXTRACT] Detected pre-extraction markers (${Q_START_MARKER} / ${Q_END_MARKER}) in combined content`);
+      }
+
+      console.log(`[EXTRACT] ===== INPUT CONTENT SENT TO PROVIDER =====`);
+      console.log(combinedContent);
+      console.log(`[EXTRACT] ===== END INPUT CONTENT (length: ${combinedContent.length}) =====`);
+
       // Get source type for instructions
       const sourceType = questionSet.source_type || 'Question Bank';
       let rawResult;
@@ -234,12 +355,12 @@ export const questionExtractionService = {
       if (provider === EXTRACTION_PROVIDERS.GEMINI) {
         // Use Gemini for extraction
         console.log(`[EXTRACT] Using Gemini AI for extraction`);
-        rawResult = await this.extractWithGemini(combinedContent, sourceType, numberOfQuestions);
+        rawResult = await this.extractWithGemini(combinedContent, sourceType, numberOfQuestions, hasMarkers);
         console.log(`[EXTRACT] Gemini raw result size: ${Math.round(rawResult.length / 1024)}KB`);
       } else {
         // Use LlamaParse for extraction (default)
         console.log(`[EXTRACT] Using LlamaParse for extraction`);
-        const jobId = await this.submitToLlamaParse(combinedContent, sourceType, numberOfQuestions);
+        const jobId = await this.submitToLlamaParse(combinedContent, sourceType, numberOfQuestions, hasMarkers);
 
         // Store the job ID
         await supabase
@@ -301,29 +422,29 @@ export const questionExtractionService = {
   },
 
   /**
-   * Combine latex documents from scanned items (preserving order)
+   * Combine latex documents from scanned items (preserving order).
+   * Prefers pre_extracted (with question boundary markers) over latex_doc when present.
    * @param {string[]} itemIds - Array of scanned item IDs (in order)
-   * @returns {Promise<string>} - Combined LaTeX content
+   * @returns {Promise<string>} - Combined content
    */
   async combineLatexContent(itemIds) {
-    // Fetch items
     const { data: items, error } = await supabase
       .from('scanned_items')
-      .select('id, latex_doc, latex_conversion_status')
+      .select('id, latex_doc, pre_extracted, latex_conversion_status')
       .in('id', itemIds);
 
     if (error) throw error;
 
     console.log(`[EXTRACT] Source items: ${items.length} items for ${itemIds.length} IDs`);
 
-    // Create a map for quick lookup
-    const itemMap = new Map(items.map((item) => [item.id, item.latex_doc]));
+    const itemMap = new Map(items.map((item) => [item.id, item]));
 
-    // Combine in the order of itemIds
     const combinedParts = itemIds.map((id, index) => {
-      const latex = itemMap.get(id) || '';
-      console.log(`[EXTRACT] Item ${index + 1} (${id}): ${latex ? Math.round(latex.length / 1024) + 'KB' : 'EMPTY/NULL'}`);
-      return `% ========== Document ${index + 1} ==========\n\n${latex}`;
+      const row = itemMap.get(id);
+      const usingPre = !!(row && row.pre_extracted);
+      const content = (usingPre ? row.pre_extracted : row?.latex_doc) || '';
+      console.log(`[EXTRACT] Item ${index + 1} (${id}): ${content ? Math.round(content.length / 1024) + 'KB' : 'EMPTY/NULL'} (source: ${usingPre ? 'pre_extracted' : 'latex_doc'})`);
+      return `% ========== Document ${index + 1} ==========\n\n${content}`;
     });
 
     return combinedParts.join('\n\n');
@@ -335,13 +456,13 @@ export const questionExtractionService = {
    * @param {string} sourceType - Source type ('Question Bank' or 'Academic Book')
    * @returns {Promise<string>} - Job ID from LlamaParse
    */
-  async submitToLlamaParse(content, sourceType = 'Question Bank', numberOfQuestions = null) {
+  async submitToLlamaParse(content, sourceType = 'Question Bank', numberOfQuestions = null, hasMarkers = false) {
     // Create a text file blob from the combined content
     const blob = new Blob([content], { type: 'text/plain' });
 
     // Get parsing instructions based on source type
-    const parsingInstructions = getParsingInstructions(sourceType, numberOfQuestions);
-    console.log(`[EXTRACT] Using parsing instructions for type: ${sourceType}${numberOfQuestions ? ` (target count: ${numberOfQuestions})` : ''}`);
+    const parsingInstructions = getParsingInstructions(sourceType, numberOfQuestions, hasMarkers);
+    console.log(`[EXTRACT] Using parsing instructions for type: ${sourceType}${numberOfQuestions ? ` (target count: ${numberOfQuestions})` : ''}${hasMarkers ? ' [marker-aware]' : ''}`);
 
     const formData = new FormData();
     formData.append('file', blob, 'questions.txt');
@@ -429,12 +550,12 @@ export const questionExtractionService = {
    * @param {string} sourceType - Source type ('Question Bank' or 'Academic Book')
    * @returns {Promise<string>} - Extracted content with questions in JSON format
    */
-  async extractWithGemini(content, sourceType = 'Question Bank', numberOfQuestions = null) {
+  async extractWithGemini(content, sourceType = 'Question Bank', numberOfQuestions = null, hasMarkers = false) {
     if (!GEMINI_API_KEY) {
       throw new Error('Gemini API key not configured. Please set GOOGLE_API_KEY in environment variables.');
     }
 
-    const parsingInstructions = getParsingInstructions(sourceType, numberOfQuestions);
+    const parsingInstructions = getParsingInstructions(sourceType, numberOfQuestions, hasMarkers);
 
     // Split content into chunks if too large (Gemini has context limits)
     const MAX_CONTENT_LENGTH = 900000; // ~900KB to stay within limits

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { scannedItemService } from '../services/index.js';
+import { scannedItemService, preExtractionService } from '../services/index.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 
 const router = Router();
@@ -201,6 +201,22 @@ router.put('/:id', asyncHandler(async (req, res) => {
     status,
     metadata,
   });
+  res.json({ success: true, data: item });
+}));
+
+// Pre-extract: annotate latex_doc with question boundary markers via LlamaParse.
+router.post('/:id/pre-extract', asyncHandler(async (req, res) => {
+  const item = await preExtractionService.annotate(req.params.id);
+  res.json({ success: true, data: item });
+}));
+
+// Manually save edited pre_extracted content.
+router.put('/:id/pre-extracted', asyncHandler(async (req, res) => {
+  const { pre_extracted } = req.body;
+  if (typeof pre_extracted !== 'string') {
+    return res.status(400).json({ success: false, error: 'pre_extracted (string) is required' });
+  }
+  const item = await preExtractionService.savePreExtracted(req.params.id, pre_extracted);
   res.json({ success: true, data: item });
 }));
 

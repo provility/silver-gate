@@ -59,10 +59,19 @@ class LessonReverseSyncer extends BaseReverseSyncer {
     const bookRefId = context.bookRefIds[item.book_id];
     const chapterRefId = context.chapterRefIds[item.chapter_id];
 
+    // If lesson name follows "Questions <min>-<max>" (e.g. "Questions 11-20",
+    // optionally with trailing period/whitespace), strip the range out of the
+    // name and use it as the index. Otherwise fall back to the stored fields.
+    const rangeMatch = typeof item.name === 'string'
+      ? item.name.match(/^(Questions)\s+(\d+)\s*-\s*(\d+)\s*\.?\s*$/)
+      : null;
+    const name = rangeMatch ? rangeMatch[1] : item.name;
+    const index = rangeMatch ? `${rangeMatch[2]}-${rangeMatch[3]}` : item.question_range;
+
     return {
       _id: toObjectId(item.ref_id),
-      name: item.name,
-      index: item.question_range,
+      name,
+      index,
       order: item.display_order,
       common_parent_section_name: item.common_parent_section_name,
       parent_section_name: item.parent_section_name,

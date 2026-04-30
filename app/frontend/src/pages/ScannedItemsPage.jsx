@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye, FileText, Pencil, Upload, Link, Download } from 'lucide-react';
+import { ScanLine, Plus, Trash2, X, CheckSquare, FileQuestion, Filter, HelpCircle, CheckCircle, Eye, FileText, Pencil, Upload, Link, Download, Sparkles } from 'lucide-react';
 import PDFViewerModal from '../components/PDFViewerModal';
 
 export default function ScannedItemsPage() {
@@ -33,6 +33,9 @@ export default function ScannedItemsPage() {
   // LaTeX viewer modal state
   const [latexViewerOpen, setLatexViewerOpen] = useState(false);
   const [selectedLatexItem, setSelectedLatexItem] = useState(null);
+  const [latexViewMode, setLatexViewMode] = useState('latex'); // 'latex' | 'pre_extracted'
+  const [preExtractedEditing, setPreExtractedEditing] = useState(false);
+  const [preExtractedDraft, setPreExtractedDraft] = useState('');
 
   // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false);
@@ -182,6 +185,43 @@ export default function ScannedItemsPage() {
     },
   });
 
+  // Pre-extract: annotate latex_doc with <<<Q_START>>>/<<<Q_END>>> markers via LlamaParse.
+  const preExtractMutation = useMutation({
+    mutationFn: (id) => api.post(`/scanned-items/${id}/pre-extract`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scannedItems'] });
+    },
+    onError: (error) => {
+      alert(`Pre-extraction failed: ${error.message}`);
+    },
+  });
+
+  // Save manually edited pre_extracted content.
+  const savePreExtractedMutation = useMutation({
+    mutationFn: ({ id, pre_extracted }) =>
+      api.put(`/scanned-items/${id}/pre-extracted`, { pre_extracted }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['scannedItems'] });
+      if (result?.data) {
+        setSelectedLatexItem(result.data);
+      }
+      setPreExtractedEditing(false);
+    },
+    onError: (error) => {
+      alert(`Save failed: ${error.message}`);
+    },
+  });
+
+  const handlePreExtract = (item) => {
+    if (item.pre_extracted_present) {
+      if (!window.confirm(`"${item.item_data}" has already been pre-extracted. Run again and overwrite?`)) {
+        return;
+      }
+    }
+    preExtractMutation.mutate(item.id);
+  };
+
+
   // Extract solutions mutation
   const extractSolutionsMutation = useMutation({
     mutationFn: (data) => api.post('/solution-sets/extract', data),
@@ -286,11 +326,18 @@ export default function ScannedItemsPage() {
   };
 
   const handleExtractQuestions = () => {
-    // Open the extraction modal with default values
+    // Default name: the selected file's name (basename without .pdf), falling back
+    // to a timestamp when nothing/everything is selected ambiguously.
+    const first = selectedItemsData[0];
+    const fileName = first?.item_data
+      ? first.item_data.split('/').pop().replace(/\.pdf$/i, '')
+      : '';
+    const defaultName = fileName || `Extraction ${new Date().toLocaleString()}`;
     setExtractFormData({
-      name: `Extraction ${new Date().toLocaleString()}`,
+      name: defaultName,
       type: 'Question Bank',
       provider: 'llamaparse',
+      numberOfQuestions: '',
     });
     setShowExtractModal(true);
   };
@@ -308,9 +355,13 @@ export default function ScannedItemsPage() {
   };
 
   const handleExtractSolutions = () => {
-    // Open the extraction modal with default values
+    const first = selectedItemsData[0];
+    const fileName = first?.item_data
+      ? first.item_data.split('/').pop().replace(/\.pdf$/i, '')
+      : '';
+    const defaultName = fileName ? `${fileName} - Solutions` : `Solution Extraction ${new Date().toLocaleString()}`;
     setExtractSolutionsFormData({
-      name: `Solution Extraction ${new Date().toLocaleString()}`,
+      name: defaultName,
       type: 'Question Bank',
       provider: 'llamaparse',
     });
@@ -395,8 +446,11 @@ export default function ScannedItemsPage() {
   };
 
   const handleViewLatex = async (item) => {
-    // List view doesn't include latex_doc — fetch full row on demand.
+    // List view doesn't include latex_doc / pre_extracted — fetch full row on demand.
     setLatexViewerOpen(true);
+    setLatexViewMode(item.pre_extracted_present ? 'pre_extracted' : 'latex');
+    setPreExtractedEditing(false);
+    setPreExtractedDraft('');
     setSelectedLatexItem({ ...item, latex_doc: 'Loading LaTeX content…' });
     try {
       const res = await api.get(`/scanned-items/${item.id}`);
@@ -407,12 +461,30 @@ export default function ScannedItemsPage() {
     }
   };
 
+  const closeLatexViewer = () => {
+    if (preExtractedEditing) {
+      if (!window.confirm('Discard your unsaved edits?')) return;
+    }
+    setLatexViewerOpen(false);
+    setSelectedLatexItem(null);
+    setPreExtractedEditing(false);
+    setPreExtractedDraft('');
+  };
+
   const hasActiveJob = activeJob?.data?.active_book_id && activeJob?.data?.active_chapter_id;
 
   // Sort items by created_at (newest first)
   const sortedItems = scannedItems?.data
     ? [...scannedItems.data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     : [];
+
+  // Derived: full item rows for currently selected ids (in selection order).
+  const selectedItemsData = getOrderedItemIds()
+    .map((id) => sortedItems.find((it) => it.id === id))
+    .filter(Boolean);
+  const allSelectedHavePreExtracted =
+    selectedItemsData.length > 0 && selectedItemsData.every((it) => it.pre_extracted_present);
+  const missingPreExtractCount = selectedItemsData.filter((it) => !it.pre_extracted_present).length;
 
   return (
     <div>
@@ -551,14 +623,25 @@ export default function ScannedItemsPage() {
               Clear Selection
             </button>
             {activeTab === 'question' ? (
-              <button
-                onClick={handleExtractQuestions}
-                disabled={extractQuestionsMutation.isPending}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                <FileQuestion className="w-5 h-5 mr-2" />
-                {extractQuestionsMutation.isPending ? 'Extracting...' : 'Extract Questions'}
-              </button>
+              <>
+                {!allSelectedHavePreExtracted && (
+                  <span className="flex items-center gap-1 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <Sparkles className="w-4 h-4" />
+                    {missingPreExtractCount === 1
+                      ? '1 selected item does not have pre-extraction'
+                      : `${missingPreExtractCount} selected items do not have pre-extraction`}
+                  </span>
+                )}
+                <button
+                  onClick={handleExtractQuestions}
+                  disabled={extractQuestionsMutation.isPending || !allSelectedHavePreExtracted}
+                  title={!allSelectedHavePreExtracted ? 'All selected items must be pre-extracted first' : ''}
+                  className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <FileQuestion className="w-5 h-5 mr-2" />
+                  {extractQuestionsMutation.isPending ? 'Extracting...' : 'Extract Questions'}
+                </button>
+              </>
             ) : (
               <button
                 onClick={handleExtractSolutions}
@@ -737,6 +820,20 @@ export default function ScannedItemsPage() {
                           disabled={item.latex_conversion_status !== 'completed'}
                         >
                           <Eye className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => handlePreExtract(item)}
+                          disabled={item.latex_conversion_status !== 'completed' || (preExtractMutation.isPending && preExtractMutation.variables === item.id)}
+                          className={`${item.latex_conversion_status !== 'completed' ? 'text-gray-300 cursor-not-allowed' : item.pre_extracted_present ? 'text-amber-500 hover:text-amber-700' : 'text-indigo-500 hover:text-indigo-700'} disabled:opacity-50`}
+                          title={
+                            item.latex_conversion_status !== 'completed'
+                              ? 'LaTeX conversion not completed'
+                              : item.pre_extracted_present
+                                ? 'Re-run pre-extraction (Q boundary markers)'
+                                : 'Pre-extract: add Q boundary markers'
+                          }
+                        >
+                          <Sparkles className="w-5 h-5" />
                         </button>
                         <button
                           onClick={() => handleEditItem(item)}
@@ -1282,44 +1379,126 @@ export default function ScannedItemsPage() {
       />
 
       {/* LaTeX Viewer Modal */}
-      {latexViewerOpen && selectedLatexItem && (
+      {latexViewerOpen && selectedLatexItem && (() => {
+        const hasPreExtracted = !!selectedLatexItem.pre_extracted;
+        const isPreTab = latexViewMode === 'pre_extracted';
+        const canEdit = isPreTab && hasPreExtracted;
+        const shownContent = isPreTab
+          ? (selectedLatexItem.pre_extracted || 'No pre-extracted content available')
+          : (selectedLatexItem.latex_doc || 'No LaTeX content available');
+        const switchTab = (mode) => {
+          if (preExtractedEditing) {
+            if (!window.confirm('Discard your unsaved edits?')) return;
+            setPreExtractedEditing(false);
+            setPreExtractedDraft('');
+          }
+          setLatexViewMode(mode);
+        };
+        return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <div>
-                <h2 className="text-lg font-semibold text-gray-800">LaTeX Content</h2>
+                <h2 className="text-lg font-semibold text-gray-800">
+                  {isPreTab ? 'Pre-extracted (with markers)' : 'LaTeX Content'}
+                </h2>
                 <p className="text-sm text-gray-500">{selectedLatexItem.item_data}</p>
               </div>
-              <button
-                onClick={() => {
-                  setLatexViewerOpen(false);
-                  setSelectedLatexItem(null);
-                }}
-                className="text-gray-500 hover:text-gray-700"
-              >
+              <button onClick={closeLatexViewer} className="text-gray-500 hover:text-gray-700">
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {hasPreExtracted && (
+              <div className="border-b border-gray-200 px-4">
+                <nav className="flex gap-4 -mb-px">
+                  <button
+                    onClick={() => switchTab('latex')}
+                    className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                      latexViewMode === 'latex'
+                        ? 'border-blue-500 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Original LaTeX
+                  </button>
+                  <button
+                    onClick={() => switchTab('pre_extracted')}
+                    className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                      latexViewMode === 'pre_extracted'
+                        ? 'border-amber-500 text-amber-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    Pre-extracted (markers)
+                  </button>
+                </nav>
+              </div>
+            )}
             <div className="p-4 overflow-auto flex-1">
-              <pre className="bg-gray-50 p-4 rounded-lg text-sm font-mono whitespace-pre-wrap break-words overflow-x-auto">
-                {selectedLatexItem.latex_doc || 'No LaTeX content available'}
-              </pre>
+              {canEdit && preExtractedEditing ? (
+                <textarea
+                  value={preExtractedDraft}
+                  onChange={(e) => setPreExtractedDraft(e.target.value)}
+                  className="w-full h-[60vh] bg-gray-50 p-4 rounded-lg text-sm font-mono border border-amber-300 focus:ring-2 focus:ring-amber-400 focus:border-transparent"
+                  spellCheck={false}
+                />
+              ) : (
+                <pre className="bg-gray-50 p-4 rounded-lg text-sm font-mono whitespace-pre-wrap break-words overflow-x-auto">
+                  {shownContent}
+                </pre>
+              )}
             </div>
             <div className="flex justify-end gap-3 p-4 border-t">
+              {canEdit && !preExtractedEditing && (
+                <button
+                  onClick={() => {
+                    setPreExtractedDraft(selectedLatexItem.pre_extracted || '');
+                    setPreExtractedEditing(true);
+                  }}
+                  className="px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 flex items-center gap-2"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit
+                </button>
+              )}
+              {canEdit && preExtractedEditing && (
+                <>
+                  <button
+                    onClick={() => {
+                      setPreExtractedEditing(false);
+                      setPreExtractedDraft('');
+                    }}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() =>
+                      savePreExtractedMutation.mutate({
+                        id: selectedLatexItem.id,
+                        pre_extracted: preExtractedDraft,
+                      })
+                    }
+                    disabled={savePreExtractedMutation.isPending || preExtractedDraft === selectedLatexItem.pre_extracted}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {savePreExtractedMutation.isPending ? 'Saving...' : 'Save'}
+                  </button>
+                </>
+              )}
+              {!preExtractedEditing && (
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(shownContent);
+                    alert('Content copied to clipboard!');
+                  }}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                >
+                  Copy to Clipboard
+                </button>
+              )}
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(selectedLatexItem.latex_doc || '');
-                  alert('LaTeX copied to clipboard!');
-                }}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-              >
-                Copy to Clipboard
-              </button>
-              <button
-                onClick={() => {
-                  setLatexViewerOpen(false);
-                  setSelectedLatexItem(null);
-                }}
+                onClick={closeLatexViewer}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Close
@@ -1327,7 +1506,8 @@ export default function ScannedItemsPage() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
