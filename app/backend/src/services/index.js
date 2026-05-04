@@ -5,7 +5,7 @@ export { jobService } from './job.service.js';
 export { scannedItemService } from './scannedItem.service.js';
 export { mathpixService } from './mathpix.service.js';
 export { questionExtractionService, EXTRACTION_PROVIDERS } from './questionExtraction.service.js';
-export { preExtractionService, Q_START_MARKER, Q_END_MARKER } from './preExtraction.service.js';
+export { preExtractionService, Q_START_MARKER, Q_END_MARKER, S_START_MARKER, S_END_MARKER } from './preExtraction.service.js';
 export { solutionExtractionService, SOLUTION_EXTRACTION_PROVIDERS } from './solutionExtraction.service.js';
 export { emailInboundService } from './emailInbound.service.js';
 export { googleDriveService } from './googleDrive.service.js';

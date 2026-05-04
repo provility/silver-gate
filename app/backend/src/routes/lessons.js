@@ -326,6 +326,43 @@ router.put('/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data: lesson });
 }));
 
+// Merge a solution set into all of a lesson's items.
+// Updates each lesson_item's solution_context (and merges answer_key /
+// worked_solution / explanation / visual_path into question_solution_item_json)
+// based on question_label match with the chosen solution_set's solutions.
+router.post('/:id/merge-solution', asyncHandler(async (req, res) => {
+  const { solution_set_id, items } = req.body;
+
+  if (!solution_set_id) {
+    return res.status(400).json({
+      success: false,
+      error: 'solution_set_id is required',
+    });
+  }
+
+  if (items !== undefined && items !== null && !Array.isArray(items)) {
+    return res.status(400).json({
+      success: false,
+      error: 'items must be an array when provided',
+    });
+  }
+
+  try {
+    const result = await lessonsService.mergeSolutionSet(
+      req.params.id,
+      solution_set_id,
+      { items: items || null }
+    );
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Error merging solution set:', error);
+    return res.status(400).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}));
+
 // Update a single lesson item
 router.put('/:lessonId/items/:itemId', asyncHandler(async (req, res) => {
   const { question_solution_item_json } = req.body;

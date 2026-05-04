@@ -1,5 +1,6 @@
 import { supabase } from '../config/database.js';
 import { config } from '../config/index.js';
+import { S_START_MARKER, S_END_MARKER } from './preExtraction.service.js';
 
 const LLAMAPARSE_API_URL = config.llamaParse.apiUrl;
 const LLAMAPARSE_API_KEY = config.llamaParse.apiKey;
@@ -297,8 +298,115 @@ CRITICAL - SOLUTIONS WITH IMAGES:
 `,
 };
 
-// Helper to get parsing instructions for a type
-const getParsingInstructions = (type) => {
+// Marker-mode parsing instruction. When the input has been pre-extracted with
+// solution boundary markers, this REPLACES the natural-language prompt entirely
+// — those base prompts assume natural-language solution discovery and their
+// rules (boundary detection by "next question number", numbering recovery,
+// JSON examples without markers) actively conflict with the marker flow.
+const MARKER_PARSING_INSTRUCTIONS = `You are a structured-data extractor. The input is plaintext / LaTeX content where every solution has been pre-wrapped with explicit boundary tokens. Your only job is to convert each marker pair into one JSON entry.
+
+THE MARKERS:
+- Solution start: the literal 13-character token   ${S_START_MARKER}
+- Solution end:   the literal 11-character token   ${S_END_MARKER}
+- Markers always come in matched pairs. They never nest.
+
+WHAT YOU MUST DO:
+1. Scan the input from start to end. Every time you encounter ${S_START_MARKER}, capture everything up to the matching ${S_END_MARKER} as ONE solution block.
+2. For each solution block, produce one entry in the "solutions" array with five fields: question_label (string), answer_key (string), visual_path (string), worked_solution (string), explanation (string).
+3. Emit one entry PER block. If the input has 17 blocks visible to you, your "solutions" array MUST have 17 entries. If it has 8 blocks visible to you, the array MUST have 8 entries. The number of entries equals the number of marker pairs, ALWAYS.
+
+LABELING (question_label) AND ANSWER (answer_key):
+- Inside each block, the FIRST line is the solution header in one of these forms:
+    * "8. (D)"            → question_label = "8",  answer_key = "D"
+    * "12. (B)"           → question_label = "12", answer_key = "B"
+    * "22. (11.00)"       → question_label = "22", answer_key = "11.00"
+    * "5) C"              → question_label = "5",  answer_key = "C"
+    * "Q3. (a)"           → question_label = "3",  answer_key = "a"
+    * "\\section*{8. (D)}" → question_label = "8",  answer_key = "D"
+- These numbers/answers are GLOBAL — they refer to the whole document. ALWAYS copy the values you literally see inside the block. NEVER renumber, NEVER reset to "1" because you think it's the first block.
+- If the header is malformed and you cannot find an answer key, set answer_key to "" (empty string), do NOT invent one.
+- If a block has NO leading number at all (rare; malformed), use the string form of the block's 1-based ordinal in YOUR view as question_label (still emit it; do not skip).
+
+VISUAL_PATH:
+- If the block contains an image reference of the form ![](URL), set visual_path to JUST the URL (no markdown, no parentheses).
+- If multiple images appear in one block, take the first one.
+- If no image appears in the block, set visual_path to "" (empty string).
+
+WORKED_SOLUTION:
+- Take the block content AFTER the header line and AFTER any image markdown line.
+- Include EVERY remaining line: equations, $\\begin{aligned}...\\end{aligned}$ / $\\begin{gathered}...\\end{gathered}$ blocks, transitional text ("Therefore", "Hence", "Equation will become"), and the final answer.
+- Preserve all LaTeX exactly ($...$, $$...$$, \\begin{...}\\end{...}, sub-parts (i)/(ii)/(iii)).
+- Join multiple lines with \\n.
+- Do NOT include the marker tokens.
+- Do NOT include the raw image markdown (![](url)) inside worked_solution — the URL goes only into visual_path.
+- Do NOT abbreviate, do NOT summarize, do NOT use "..." as a placeholder.
+
+EXPLANATION:
+- Set explanation to "" (empty string) unless the block contains a clearly separate "Explanation:" / "Reasoning:" labelled segment after the worked solution.
+
+WHAT YOU MUST NOT DO:
+- DO NOT skip any block. Every ${S_START_MARKER} you see must produce an entry.
+- DO NOT merge two blocks into one entry, or split one block into two entries.
+- DO NOT extract anything from text OUTSIDE the markers. Section headings (e.g. "\\section*{ANSWER KEY}"), page noise, separator lines, orphan numbers, and stray text between blocks are all NOISE and must be ignored.
+- DO NOT include the literal tokens ${S_START_MARKER} or ${S_END_MARKER} anywhere in your output.
+- DO NOT invent, fabricate, or pad with placeholder entries. The number of entries must equal the number of marker pairs you can see — no more, no less.
+- DO NOT renumber labels or answer keys. Always use the values printed INSIDE the block.
+
+OUTPUT FORMAT:
+- Return ONE and ONLY ONE JSON object of the form:
+  {
+    "solutions": [
+      { "question_label": "1", "answer_key": "C", "visual_path": "", "worked_solution": "...", "explanation": "" },
+      { "question_label": "2", "answer_key": "11.00", "visual_path": "https://...", "worked_solution": "...", "explanation": "" },
+      ...
+    ]
+  }
+- No markdown code fences. No commentary. No preamble. The response must start with { and end with }.
+
+EXAMPLE INPUT (a 3-block excerpt):
+\\section*{ANSWER KEY}
+
+${S_START_MARKER}
+7. (D)
+$\\sin^{-1}(2x) + \\cos^{-1}(2x) = \\pi/2$
+$x = \\frac{1}{4}$
+${S_END_MARKER}
+
+${S_START_MARKER}
+8. (B)
+![](https://cdn.mathpix.com/cropped/xxx.jpg)
+Equation will become
+$x^2 - y^2 = 10xy$
+${S_END_MARKER}
+
+${S_START_MARKER}
+22. (11.00)
+$A(2,6,2) B(-4,0,\\lambda)$
+$5 - 6\\lambda = 11$
+${S_END_MARKER}
+
+EXAMPLE OUTPUT:
+{ "solutions": [
+  { "question_label": "7",  "answer_key": "D",     "visual_path": "",                                          "worked_solution": "$\\sin^{-1}(2x) + \\cos^{-1}(2x) = \\pi/2$\\n$x = \\frac{1}{4}$", "explanation": "" },
+  { "question_label": "8",  "answer_key": "B",     "visual_path": "https://cdn.mathpix.com/cropped/xxx.jpg",   "worked_solution": "Equation will become\\n$x^2 - y^2 = 10xy$", "explanation": "" },
+  { "question_label": "22", "answer_key": "11.00", "visual_path": "",                                          "worked_solution": "$A(2,6,2) B(-4,0,\\lambda)$\\n$5 - 6\\lambda = 11$", "explanation": "" }
+] }
+
+FINAL CHECK BEFORE RESPONDING:
+- Count the ${S_START_MARKER} occurrences in the input visible to you, call it K.
+- Count the entries in your "solutions" array, call it N.
+- N MUST equal K. If they differ, you have made a mistake — fix it before responding.
+- Verify question_label and answer_key values were copied from inside each block, not generated by your own counter.`;
+
+// Helper to get parsing instructions for a type, optionally swapping in the
+// marker-mode prompt when boundary markers are present in the input.
+const getParsingInstructions = (type, hasMarkers = false) => {
+  if (hasMarkers) {
+    console.log(`[SOLUTION_EXTRACT] ===== FINAL PARSING PROMPT (marker mode, type ignored) =====`);
+    console.log(MARKER_PARSING_INSTRUCTIONS);
+    console.log(`[SOLUTION_EXTRACT] ===== END PROMPT (length: ${MARKER_PARSING_INSTRUCTIONS.length}) =====`);
+    return MARKER_PARSING_INSTRUCTIONS;
+  }
   return SOLUTION_PARSING_INSTRUCTIONS[type] || SOLUTION_PARSING_INSTRUCTIONS['Question Bank'];
 };
 
@@ -379,6 +487,16 @@ export const solutionExtractionService = {
       const combinedContent = await this.combineLatexContent(solutionSet.source_item_ids);
       console.log(`[SOLUTION_EXTRACT] Combined LaTeX content size: ${Math.round(combinedContent.length / 1024)}KB`);
 
+      // Detect whether any source item contributed pre-extracted content with solution boundary markers.
+      const hasMarkers = combinedContent.includes(S_START_MARKER) && combinedContent.includes(S_END_MARKER);
+      if (hasMarkers) {
+        console.log(`[SOLUTION_EXTRACT] Detected pre-extraction markers (${S_START_MARKER} / ${S_END_MARKER}) in combined content`);
+      }
+
+      console.log(`[SOLUTION_EXTRACT] ===== INPUT CONTENT SENT TO PROVIDER =====`);
+      console.log(combinedContent);
+      console.log(`[SOLUTION_EXTRACT] ===== END INPUT CONTENT (length: ${combinedContent.length}) =====`);
+
       // Get source type for instructions
       const sourceType = solutionSet.source_type || 'Question Bank';
       let rawResult;
@@ -386,12 +504,12 @@ export const solutionExtractionService = {
       if (provider === SOLUTION_EXTRACTION_PROVIDERS.GEMINI) {
         // Use Gemini for extraction
         console.log(`[SOLUTION_EXTRACT] Using Gemini AI for extraction`);
-        rawResult = await this.extractWithGemini(combinedContent, sourceType);
+        rawResult = await this.extractWithGemini(combinedContent, sourceType, hasMarkers);
         console.log(`[SOLUTION_EXTRACT] Gemini raw result size: ${Math.round(rawResult.length / 1024)}KB`);
       } else {
         // Use LlamaParse for extraction (default)
         console.log(`[SOLUTION_EXTRACT] Using LlamaParse for extraction`);
-        const jobId = await this.submitToLlamaParse(combinedContent, sourceType);
+        const jobId = await this.submitToLlamaParse(combinedContent, sourceType, hasMarkers);
 
         // Store the job ID
         await supabase
@@ -461,29 +579,29 @@ export const solutionExtractionService = {
   },
 
   /**
-   * Combine latex documents from scanned items (preserving order)
+   * Combine latex documents from scanned items (preserving order).
+   * Prefers pre_extracted (with solution boundary markers) over latex_doc when present.
    * @param {string[]} itemIds - Array of scanned item IDs (in order)
-   * @returns {Promise<string>} - Combined LaTeX content
+   * @returns {Promise<string>} - Combined content
    */
   async combineLatexContent(itemIds) {
-    // Fetch items
     const { data: items, error } = await supabase
       .from('scanned_items')
-      .select('id, latex_doc, latex_conversion_status')
+      .select('id, latex_doc, pre_extracted, latex_conversion_status')
       .in('id', itemIds);
 
     if (error) throw error;
 
     console.log(`[SOLUTION_EXTRACT] Source items: ${items.length} items for ${itemIds.length} IDs`);
 
-    // Create a map for quick lookup
-    const itemMap = new Map(items.map((item) => [item.id, item.latex_doc]));
+    const itemMap = new Map(items.map((item) => [item.id, item]));
 
-    // Combine in the order of itemIds
     const combinedParts = itemIds.map((id, index) => {
-      const latex = itemMap.get(id) || '';
-      console.log(`[SOLUTION_EXTRACT] Item ${index + 1} (${id}): ${latex ? Math.round(latex.length / 1024) + 'KB' : 'EMPTY/NULL'}`);
-      return `% ========== Document ${index + 1} ==========\n\n${latex}`;
+      const row = itemMap.get(id);
+      const usingPre = !!(row && row.pre_extracted);
+      const content = (usingPre ? row.pre_extracted : row?.latex_doc) || '';
+      console.log(`[SOLUTION_EXTRACT] Item ${index + 1} (${id}): ${content ? Math.round(content.length / 1024) + 'KB' : 'EMPTY/NULL'} (source: ${usingPre ? 'pre_extracted' : 'latex_doc'})`);
+      return `% ========== Document ${index + 1} ==========\n\n${content}`;
     });
 
     return combinedParts.join('\n\n');
@@ -495,13 +613,13 @@ export const solutionExtractionService = {
    * @param {string} sourceType - Source type ('Question Bank' or 'Academic Book')
    * @returns {Promise<string>} - Job ID from LlamaParse
    */
-  async submitToLlamaParse(content, sourceType = 'Question Bank') {
+  async submitToLlamaParse(content, sourceType = 'Question Bank', hasMarkers = false) {
     // Create a text file blob from the combined content
     const blob = new Blob([content], { type: 'text/plain' });
 
-    // Get parsing instructions based on source type
-    const parsingInstructions = getParsingInstructions(sourceType);
-    console.log(`[SOLUTION_EXTRACT] Using parsing instructions for type: ${sourceType}`);
+    // Get parsing instructions based on source type / marker mode
+    const parsingInstructions = getParsingInstructions(sourceType, hasMarkers);
+    console.log(`[SOLUTION_EXTRACT] Using parsing instructions for type: ${sourceType}${hasMarkers ? ' [marker-aware]' : ''}`);
 
     const formData = new FormData();
     formData.append('file', blob, 'solutions.txt');
@@ -589,12 +707,12 @@ export const solutionExtractionService = {
    * @param {string} sourceType - Source type ('Question Bank' or 'Academic Book')
    * @returns {Promise<string>} - Extracted content with solutions in JSON format
    */
-  async extractWithGemini(content, sourceType = 'Question Bank') {
+  async extractWithGemini(content, sourceType = 'Question Bank', hasMarkers = false) {
     if (!GEMINI_API_KEY) {
       throw new Error('Gemini API key not configured. Please set GOOGLE_API_KEY in environment variables.');
     }
 
-    const parsingInstructions = getParsingInstructions(sourceType);
+    const parsingInstructions = getParsingInstructions(sourceType, hasMarkers);
 
     // Split content into chunks if too large (Gemini has context limits)
     const MAX_CONTENT_LENGTH = 900000; // ~900KB to stay within limits

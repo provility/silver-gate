@@ -6,6 +6,8 @@ const LLAMAPARSE_API_KEY = config.llamaParse.apiKey;
 
 export const Q_START_MARKER = '<<<Q_START>>>';
 export const Q_END_MARKER = '<<<Q_END>>>';
+export const S_START_MARKER = '<<<S_START>>>';
+export const S_END_MARKER = '<<<S_END>>>';
 
 const PRE_EXTRACTION_INSTRUCTIONS = `You are a question-boundary annotator. Your job is to take the LaTeX/Markdown content below (produced by an OCR pipeline from a question paper or academic book) and return the SAME content with explicit boundary markers wrapped around each question.
 
@@ -69,15 +71,108 @@ FINAL RULES:
 - Do NOT add markers around non-question content.
 - If you are unsure whether something is a question, leave it OUTSIDE the markers.`;
 
+const SOLUTION_PRE_EXTRACTION_INSTRUCTIONS = `You are a solution-boundary annotator. Your job is to take the LaTeX/Markdown content below (produced by an OCR pipeline from an answer key / solutions document) and return the SAME content with explicit boundary markers wrapped around each individual solution.
+
+OUTPUT FORMAT — STRICT:
+- Wrap every solution with the exact tokens ${S_START_MARKER} and ${S_END_MARKER}.
+- ${S_START_MARKER} goes at the very beginning of each solution (before its question number / answer-key header).
+- ${S_END_MARKER} goes at the very end of that solution (immediately before the next solution starts, or at end of document).
+- Do NOT translate, summarize, rewrite, renumber, or "clean up" the content.
+- Preserve ALL original characters, LaTeX commands, math delimiters, image references, line breaks, and whitespace EXACTLY as in the input. The only change you make is INSERTING the two markers around each solution.
+- Content that is NOT part of a solution (chapter/section titles, page headers/footers, separator lines, blank lines between solutions, orphan numbers like "5." or "20." sitting alone with no answer key or working) MUST stay where it is, OUTSIDE any marker pair.
+
+WHAT COUNTS AS A SOLUTION:
+- A solution begins with a header line that pairs a question number with an answer key, in formats such as:
+    * "8. (D)"            — letter answer in parentheses
+    * "12. (B)"
+    * "22. (11.00)"       — numerical / integer-type answer
+    * "5) C"              — with closing paren
+    * "Q3. (a)"           — Q-prefix, lowercase letter
+    * "\\section*{8. (D)}" — when the OCR has wrapped the header in a section command
+- After the header line, a solution typically contains:
+    * An optional image reference (e.g. "![](https://cdn.mathpix.com/cropped/...)") — KEEP it inside the marker pair.
+    * Worked steps, equations, $\\begin{aligned}...\\end{aligned}$ / $\\begin{gathered}...\\end{gathered}$ blocks, inline math, transitional text ("Therefore", "Hence", "Equation will become"), and a final answer.
+- The solution ENDS exactly at the start of the next solution's header (the next "<number>. (<answer>)" pattern). At that point, close ${S_END_MARKER} BEFORE the next header, then open a new ${S_START_MARKER} for the next solution.
+- The marker pair must enclose: the header line, any image, AND the entire worked solution body, sub-parts (i)/(ii)/(iii), and final answer line.
+
+WHAT IS NOT A SOLUTION:
+- A bare number on its own line (e.g. "4.", "5.", "20.") with NO answer-key parenthetical and no working below it — this is OCR noise. Leave it untouched, outside any marker.
+- Section/chapter titles, page headers/footers, watermarks.
+- Standalone image links that are not attached to a solution header.
+- "(Example)" labels or other annotations that sit between solutions.
+
+NUMBERING IS UNRELIABLE:
+- The OCR may misplace, repeat, skip, or omit question numbers and answer keys. Do not rely on numbering to identify boundaries — rely on the "<number>. (<answer>)" header pattern plus the worked content that follows.
+- Include any visible question label and answer key INSIDE the marker pair, so downstream consumers can still see them.
+
+EXAMPLE INPUT:
+\\section*{ANSWER KEY}
+
+7. (D)
+$\\sin^{-1}(2x) + \\cos^{-1}(2x) = \\pi/2$
+$x = \\frac{1}{4}$
+8. (B)
+![](https://cdn.mathpix.com/cropped/xxx.jpg)
+Equation will become
+$x^2 - y^2 = 10xy$
+9.
+22. (11.00)
+$A(2,6,2) B(-4,0,\\lambda)$
+$5 - 6\\lambda = 11$
+
+EXAMPLE OUTPUT:
+\\section*{ANSWER KEY}
+
+${S_START_MARKER}
+7. (D)
+$\\sin^{-1}(2x) + \\cos^{-1}(2x) = \\pi/2$
+$x = \\frac{1}{4}$
+${S_END_MARKER}
+${S_START_MARKER}
+8. (B)
+![](https://cdn.mathpix.com/cropped/xxx.jpg)
+Equation will become
+$x^2 - y^2 = 10xy$
+${S_END_MARKER}
+9.
+${S_START_MARKER}
+22. (11.00)
+$A(2,6,2) B(-4,0,\\lambda)$
+$5 - 6\\lambda = 11$
+${S_END_MARKER}
+
+FINAL RULES:
+- Output ONLY the annotated content. No JSON, no code fences, no commentary, no preamble like "Here is the annotated content".
+- Every solution MUST have exactly one ${S_START_MARKER} and exactly one ${S_END_MARKER}.
+- Marker pairs MUST NOT overlap or nest.
+- Do NOT add markers around non-solution content (orphan numbers, section titles, blank lines).
+- If you are unsure whether something is a solution, leave it OUTSIDE the markers.`;
+
+const ANNOTATION_CONFIGS = {
+  question: {
+    instructions: PRE_EXTRACTION_INSTRUCTIONS,
+    startMarker: Q_START_MARKER,
+    endMarker: Q_END_MARKER,
+    label: 'question',
+  },
+  solution: {
+    instructions: SOLUTION_PRE_EXTRACTION_INSTRUCTIONS,
+    startMarker: S_START_MARKER,
+    endMarker: S_END_MARKER,
+    label: 'solution',
+  },
+};
+
 export const preExtractionService = {
   /**
-   * Annotate a scanned item's latex_doc with question boundary markers.
+   * Annotate a scanned item's latex_doc with boundary markers.
+   * Picks the question or solution prompt based on the item's item_type.
    * Stores the result in scanned_items.pre_extracted.
    */
   async annotate(scannedItemId) {
     const { data: item, error: fetchError } = await supabase
       .from('scanned_items')
-      .select('id, latex_doc, latex_conversion_status')
+      .select('id, latex_doc, latex_conversion_status, item_type')
       .eq('id', scannedItemId)
       .single();
 
@@ -87,20 +182,22 @@ export const preExtractionService = {
       throw new Error('LaTeX conversion is not completed for this item');
     }
 
-    console.log(`[PRE-EXTRACT] Item ${scannedItemId}: latex_doc size ${Math.round(item.latex_doc.length / 1024)}KB`);
-    console.log(`[PRE-EXTRACT] ===== ANNOTATION PROMPT =====`);
-    console.log(PRE_EXTRACTION_INSTRUCTIONS);
-    console.log(`[PRE-EXTRACT] ===== END PROMPT (length: ${PRE_EXTRACTION_INSTRUCTIONS.length}) =====`);
+    const cfg = ANNOTATION_CONFIGS[item.item_type] || ANNOTATION_CONFIGS.question;
 
-    const jobId = await this.submitToLlamaParse(item.latex_doc);
+    console.log(`[PRE-EXTRACT] Item ${scannedItemId} (type: ${item.item_type || 'question'}): latex_doc size ${Math.round(item.latex_doc.length / 1024)}KB`);
+    console.log(`[PRE-EXTRACT] ===== ANNOTATION PROMPT (${cfg.label}) =====`);
+    console.log(cfg.instructions);
+    console.log(`[PRE-EXTRACT] ===== END PROMPT (length: ${cfg.instructions.length}) =====`);
+
+    const jobId = await this.submitToLlamaParse(item.latex_doc, cfg.instructions);
     console.log(`[PRE-EXTRACT] LlamaParse job: ${jobId}`);
 
     const annotated = await this.pollForCompletion(jobId);
     console.log(`[PRE-EXTRACT] Annotated size: ${Math.round(annotated.length / 1024)}KB`);
 
-    const startCount = (annotated.match(new RegExp(Q_START_MARKER, 'g')) || []).length;
-    const endCount = (annotated.match(new RegExp(Q_END_MARKER, 'g')) || []).length;
-    console.log(`[PRE-EXTRACT] Marker counts — start: ${startCount}, end: ${endCount}`);
+    const startCount = (annotated.match(new RegExp(cfg.startMarker, 'g')) || []).length;
+    const endCount = (annotated.match(new RegExp(cfg.endMarker, 'g')) || []).length;
+    console.log(`[PRE-EXTRACT] Marker counts (${cfg.label}) — start: ${startCount}, end: ${endCount}`);
 
     const { data: updated, error: updateError } = await supabase
       .from('scanned_items')
@@ -142,11 +239,11 @@ export const preExtractionService = {
     return data;
   },
 
-  async submitToLlamaParse(content) {
+  async submitToLlamaParse(content, instructions = PRE_EXTRACTION_INSTRUCTIONS) {
     const blob = new Blob([content], { type: 'text/plain' });
     const formData = new FormData();
     formData.append('file', blob, 'pre_extract.txt');
-    formData.append('parsing_instruction', PRE_EXTRACTION_INSTRUCTIONS);
+    formData.append('parsing_instruction', instructions);
     formData.append('result_type', 'markdown');
     formData.append('premium_mode', 'true');
 

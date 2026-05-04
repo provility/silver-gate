@@ -185,7 +185,7 @@ export default function ScannedItemsPage() {
     },
   });
 
-  // Pre-extract: annotate latex_doc with <<<Q_START>>>/<<<Q_END>>> markers via LlamaParse.
+  // Pre-extract: annotate latex_doc with boundary markers (Q_* for questions, S_* for solutions) via LlamaParse.
   const preExtractMutation = useMutation({
     mutationFn: (id) => api.post(`/scanned-items/${id}/pre-extract`),
     onSuccess: () => {
@@ -643,14 +643,25 @@ export default function ScannedItemsPage() {
                 </button>
               </>
             ) : (
-              <button
-                onClick={handleExtractSolutions}
-                disabled={extractSolutionsMutation.isPending}
-                className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-              >
-                <CheckCircle className="w-5 h-5 mr-2" />
-                {extractSolutionsMutation.isPending ? 'Extracting...' : 'Extract Solutions'}
-              </button>
+              <>
+                {!allSelectedHavePreExtracted && (
+                  <span className="flex items-center gap-1 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <Sparkles className="w-4 h-4" />
+                    {missingPreExtractCount === 1
+                      ? '1 selected item does not have pre-extraction'
+                      : `${missingPreExtractCount} selected items do not have pre-extraction`}
+                  </span>
+                )}
+                <button
+                  onClick={handleExtractSolutions}
+                  disabled={extractSolutionsMutation.isPending || !allSelectedHavePreExtracted}
+                  title={!allSelectedHavePreExtracted ? 'All selected items must be pre-extracted first' : ''}
+                  className="flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CheckCircle className="w-5 h-5 mr-2" />
+                  {extractSolutionsMutation.isPending ? 'Extracting...' : 'Extract Solutions'}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -829,8 +840,8 @@ export default function ScannedItemsPage() {
                             item.latex_conversion_status !== 'completed'
                               ? 'LaTeX conversion not completed'
                               : item.pre_extracted_present
-                                ? 'Re-run pre-extraction (Q boundary markers)'
-                                : 'Pre-extract: add Q boundary markers'
+                                ? `Re-run pre-extraction (${item.item_type === 'solution' ? 'S' : 'Q'} boundary markers)`
+                                : `Pre-extract: add ${item.item_type === 'solution' ? 'S' : 'Q'} boundary markers`
                           }
                         >
                           <Sparkles className="w-5 h-5" />

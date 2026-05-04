@@ -829,6 +829,144 @@ export const lessonsService = {
   },
 
   /**
+   * Merge a solution set into all of a lesson's items.
+   *
+   * Two modes:
+   *  - Auto-match (default): looks up each lesson_item's matching solution by
+   *    question_label and merges answer_key / worked_solution / explanation /
+   *    visual_path into question_solution_item_json.
+   *  - Per-item overrides (when `options.items` is provided): applies the
+   *    user-edited values directly, ignoring auto-match. Each entry must be
+   *    `{ item_id, answer_key?, worked_solution?, explanation?, visual_path? }`.
+   *
+   * In both modes, solution_context is rebuilt from the merged JSON using the
+   * same convention as create / appendItems / updateLessonItem. Items with no
+   * match (and no override) are left untouched. Always links the chosen
+   * solution_set to the lesson so the footer reflects it.
+   */
+  async mergeSolutionSet(lessonId, solutionSetId, options = {}) {
+    const { items: itemOverrides = null } = options;
+
+    const { data: lesson, error: lessonError } = await supabase
+      .from('lessons')
+      .select('id')
+      .eq('id', lessonId)
+      .single();
+
+    if (lessonError || !lesson) {
+      throw new Error('Lesson not found');
+    }
+
+    const solutionSet = await solutionExtractionService.findById(solutionSetId);
+    if (!solutionSet) {
+      throw new Error('Solution set not found');
+    }
+
+    const overrideMode = Array.isArray(itemOverrides) && itemOverrides.length > 0;
+
+    let solutionsMap = null;
+    if (!overrideMode) {
+      const solutions = solutionSet.solutions?.solutions || [];
+      if (!solutions.length) {
+        throw new Error('Selected solution set has no solutions');
+      }
+      solutionsMap = new Map();
+      for (const s of solutions) {
+        if (s.question_label !== undefined && s.question_label !== null) {
+          solutionsMap.set(String(s.question_label), s);
+        }
+      }
+    }
+
+    const { data: items, error: itemsError } = await supabase
+      .from('lesson_items')
+      .select('id, question_label, question_solution_item_json')
+      .eq('lesson_id', lessonId);
+
+    if (itemsError) throw itemsError;
+
+    const overridesById = new Map();
+    if (overrideMode) {
+      for (const o of itemOverrides) {
+        if (o && o.item_id) overridesById.set(o.item_id, o);
+      }
+    }
+
+    let matched = 0;
+    const unmatchedLabels = [];
+
+    for (const row of items || []) {
+      const baseJson = row.question_solution_item_json || {};
+      let solFields;
+
+      if (overrideMode) {
+        const o = overridesById.get(row.id);
+        if (!o) continue;
+        solFields = {
+          answer_key: o.answer_key,
+          worked_solution: o.worked_solution,
+          explanation: o.explanation,
+          visual_path: o.visual_path,
+        };
+      } else {
+        const label = row.question_label !== null && row.question_label !== undefined
+          ? String(row.question_label)
+          : null;
+        const sol = label ? solutionsMap.get(label) : null;
+        if (!sol) {
+          if (label) unmatchedLabels.push(label);
+          continue;
+        }
+        solFields = {
+          answer_key: sol.answer_key,
+          worked_solution: sol.worked_solution,
+          explanation: sol.explanation,
+          visual_path: sol.visual_path,
+        };
+      }
+
+      const mergedJson = {
+        ...baseJson,
+        answer_key: solFields.answer_key ?? baseJson.answer_key ?? '',
+        worked_solution: solFields.worked_solution ?? baseJson.worked_solution ?? '',
+        explanation: solFields.explanation ?? baseJson.explanation ?? '',
+        visual_path: solFields.visual_path ?? baseJson.visual_path ?? '',
+      };
+
+      let solutionContext = '';
+      if (mergedJson.answer_key) solutionContext = `Answer: ${mergedJson.answer_key}`;
+      if (mergedJson.worked_solution) {
+        solutionContext += (solutionContext ? '\n\n' : '') + mergedJson.worked_solution;
+      }
+
+      const { error: updateError } = await supabase
+        .from('lesson_items')
+        .update({
+          question_solution_item_json: mergedJson,
+          solution_context: solutionContext,
+        })
+        .eq('id', row.id);
+
+      if (updateError) throw updateError;
+      matched += 1;
+    }
+
+    // Link the solution set to the lesson so the modal footer reflects it.
+    await supabase
+      .from('lessons')
+      .update({ solution_set_id: solutionSetId })
+      .eq('id', lessonId);
+
+    const refreshed = await this.findById(lessonId);
+    return {
+      lesson: refreshed,
+      matched,
+      total_items: items?.length || 0,
+      unmatched_labels: unmatchedLabels,
+    };
+  },
+
+  /**
    * Delete a lesson (cascades to lesson_items)
    */
   async delete(id) {

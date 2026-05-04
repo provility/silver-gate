@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { BookOpen, X, Save, Edit2, FileQuestion, CheckCircle, Code, Eye, Trash2, Plus } from 'lucide-react';
+import { BookOpen, X, Save, Edit2, FileQuestion, CheckCircle, Code, Eye, Trash2, Plus, GitMerge } from 'lucide-react';
 import QuestionText from './QuestionText';
 import AddLessonItemsModal from './AddLessonItemsModal';
+import MergeSolutionModal from './MergeSolutionModal';
 
 export default function LessonModal({ lesson, onClose }) {
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [showJsonView, setShowJsonView] = useState(false);
   const [showAddItems, setShowAddItems] = useState(false);
+  const [showMergeSolution, setShowMergeSolution] = useState(false);
   const [editedName, setEditedName] = useState(lesson.name);
   const [editedItems, setEditedItems] = useState(
     lesson.lesson_items || []
@@ -378,6 +380,15 @@ export default function LessonModal({ lesson, onClose }) {
               Add Lesson Items
             </button>
             <button
+              onClick={() => setShowMergeSolution(true)}
+              disabled={!editedItems.length}
+              title={!editedItems.length ? 'Add lesson items first' : 'Merge a solution set into all items'}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              <GitMerge className="w-4 h-4" />
+              Merge Solution
+            </button>
+            <button
               onClick={onClose}
               className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
             >
@@ -390,6 +401,12 @@ export default function LessonModal({ lesson, onClose }) {
       <AddLessonItemsModal
         isOpen={showAddItems}
         onClose={() => setShowAddItems(false)}
+        lesson={lesson}
+      />
+
+      <MergeSolutionModal
+        isOpen={showMergeSolution}
+        onClose={() => setShowMergeSolution(false)}
         lesson={lesson}
       />
     </div>
