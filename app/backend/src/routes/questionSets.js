@@ -152,6 +152,36 @@ router.post('/extract', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, data: questionSet });
 }));
 
+// Replace the questions JSON for an existing question set.
+router.put('/:id', asyncHandler(async (req, res) => {
+  const { questions } = req.body;
+  if (questions === undefined || questions === null) {
+    return res.status(400).json({
+      success: false,
+      error: 'questions is required',
+    });
+  }
+
+  let parsed = questions;
+  if (typeof questions === 'string') {
+    try {
+      parsed = JSON.parse(questions);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid JSON format for questions',
+      });
+    }
+  }
+
+  try {
+    const updated = await questionExtractionService.updateQuestions(req.params.id, parsed);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+}));
+
 // Delete question set
 router.delete('/:id', asyncHandler(async (req, res) => {
   await questionExtractionService.delete(req.params.id);

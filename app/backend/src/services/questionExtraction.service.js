@@ -1046,6 +1046,44 @@ IMPORTANT: Return ONLY the JSON object with the "questions" array. Do not includ
   },
 
   /**
+   * Replace the questions JSON for an existing question set.
+   * Accepts either a wrapped object `{ questions: [...] }` or a bare array,
+   * normalizing to the wrapped shape that the rest of the pipeline expects.
+   * Also updates total_questions to keep the count column in sync.
+   */
+  async updateQuestions(questionSetId, questionsInput) {
+    let normalized;
+    if (Array.isArray(questionsInput)) {
+      normalized = { questions: questionsInput };
+    } else if (
+      questionsInput &&
+      typeof questionsInput === 'object' &&
+      Array.isArray(questionsInput.questions)
+    ) {
+      normalized = { ...questionsInput, questions: questionsInput.questions };
+    } else {
+      throw new Error('Invalid questions format. Expected { questions: [...] } or [...]');
+    }
+
+    const { data, error } = await supabase
+      .from('question_sets')
+      .update({
+        questions: normalized,
+        total_questions: normalized.questions.length,
+      })
+      .eq('id', questionSetId)
+      .select(`
+        *,
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number)
+      `)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * Delete a question set
    */
   async delete(questionSetId) {

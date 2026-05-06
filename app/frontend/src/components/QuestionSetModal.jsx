@@ -1,13 +1,69 @@
-import { useState } from 'react';
-import { X, FileQuestion, Code, Eye } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { X, FileQuestion, Code, Eye, Edit2, Save, Loader2, AlertCircle } from 'lucide-react';
 import QuestionText from './QuestionText';
 
 export default function QuestionSetModal({ isOpen, onClose, questionSet }) {
+  const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState('preview'); // 'preview' or 'json'
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftJson, setDraftJson] = useState('');
+  const [parseError, setParseError] = useState(null);
+
+  // Reset edit state whenever a new question set is opened or modal closes.
+  useEffect(() => {
+    setIsEditing(false);
+    setParseError(null);
+    setDraftJson(
+      questionSet?.questions ? JSON.stringify(questionSet.questions, null, 2) : ''
+    );
+  }, [questionSet?.id, isOpen]);
+
+  const saveMutation = useMutation({
+    mutationFn: (parsed) =>
+      api.put(`/question-sets/${questionSet.id}`, { questions: parsed }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['questionSets'] });
+      await queryClient.invalidateQueries({ queryKey: ['questionSet', questionSet.id] });
+      await queryClient.refetchQueries({ queryKey: ['questionSets'] });
+      setIsEditing(false);
+    },
+  });
 
   if (!isOpen || !questionSet) return null;
 
   const questions = questionSet.questions?.questions || [];
+
+  const handleStartEdit = () => {
+    setDraftJson(JSON.stringify(questionSet.questions ?? { questions: [] }, null, 2));
+    setParseError(null);
+    saveMutation.reset();
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setDraftJson(JSON.stringify(questionSet.questions ?? { questions: [] }, null, 2));
+    setParseError(null);
+    saveMutation.reset();
+    setIsEditing(false);
+  };
+
+  const handleSave = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(draftJson);
+    } catch (e) {
+      setParseError(e.message);
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.questions)) {
+      setParseError('JSON must have a "questions" array property');
+      return;
+    }
+    setParseError(null);
+    saveMutation.mutate(parsed);
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -32,33 +88,71 @@ export default function QuestionSetModal({ isOpen, onClose, questionSet }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* View Mode Toggle */}
-            <div className="flex rounded-lg border border-gray-300 bg-white overflow-hidden">
+            {/* View Mode Toggle (hidden in edit mode — JSON only) */}
+            {!isEditing && (
+              <div className="flex rounded-lg border border-gray-300 bg-white overflow-hidden">
+                <button
+                  onClick={() => setViewMode('preview')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
+                    viewMode === 'preview'
+                      ? 'bg-blue-500 text-white'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="Preview"
+                >
+                  <Eye className="w-4 h-4" />
+                  Preview
+                </button>
+                <button
+                  onClick={() => setViewMode('json')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
+                    viewMode === 'json'
+                      ? 'bg-blue-500 text-white'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="JSON"
+                >
+                  <Code className="w-4 h-4" />
+                  JSON
+                </button>
+              </div>
+            )}
+
+            {/* Edit / Save / Cancel */}
+            {viewMode === 'json' && !isEditing && (
               <button
-                onClick={() => setViewMode('preview')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
-                  viewMode === 'preview'
-                    ? 'bg-blue-500 text-white'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-                title="Preview"
+                onClick={handleStartEdit}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                title="Edit JSON"
               >
-                <Eye className="w-4 h-4" />
-                Preview
+                <Edit2 className="w-4 h-4" />
+                Edit
               </button>
-              <button
-                onClick={() => setViewMode('json')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
-                  viewMode === 'json'
-                    ? 'bg-blue-500 text-white'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-                title="JSON"
-              >
-                <Code className="w-4 h-4" />
-                JSON
-              </button>
-            </div>
+            )}
+            {isEditing && (
+              <>
+                <button
+                  onClick={handleSave}
+                  disabled={saveMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                >
+                  {saveMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  {saveMutation.isPending ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  disabled={saveMutation.isPending}
+                  className="px-3 py-1.5 text-sm font-medium bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+
             <button
               onClick={onClose}
               className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
@@ -83,8 +177,33 @@ export default function QuestionSetModal({ isOpen, onClose, questionSet }) {
             </div>
           )}
 
-          {viewMode === 'json' ? (
-            /* JSON View */
+          {(saveMutation.isError || parseError) && (
+            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>
+                {parseError
+                  ? `Invalid JSON: ${parseError}`
+                  : saveMutation.error?.response?.data?.error ||
+                    saveMutation.error?.message ||
+                    'Failed to save questions'}
+              </span>
+            </div>
+          )}
+
+          {isEditing ? (
+            <div className="bg-gray-900 rounded-lg overflow-hidden">
+              <textarea
+                value={draftJson}
+                onChange={(e) => {
+                  setDraftJson(e.target.value);
+                  if (parseError) setParseError(null);
+                }}
+                spellCheck={false}
+                className="w-full min-h-[60vh] p-4 bg-gray-900 text-gray-100 font-mono text-sm border-0 focus:outline-none focus:ring-0 resize-y"
+              />
+            </div>
+          ) : viewMode === 'json' ? (
+            /* JSON View (read-only) */
             <div className="bg-gray-900 rounded-lg p-4 overflow-auto">
               <pre className="text-sm text-gray-100 font-mono whitespace-pre-wrap break-words">
                 {JSON.stringify(questionSet.questions, null, 2)}

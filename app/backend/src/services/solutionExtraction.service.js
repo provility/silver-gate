@@ -1498,6 +1498,45 @@ IMPORTANT: Return ONLY the JSON object with the "solutions" array. Do not includ
   },
 
   /**
+   * Replace the solutions JSON for an existing solution set.
+   * Accepts either a wrapped object `{ solutions: [...] }` or a bare array,
+   * normalizing to the wrapped shape that the rest of the pipeline expects.
+   * Also updates total_solutions to keep the count column in sync.
+   */
+  async updateSolutions(solutionSetId, solutionsInput) {
+    let normalized;
+    if (Array.isArray(solutionsInput)) {
+      normalized = { solutions: solutionsInput };
+    } else if (
+      solutionsInput &&
+      typeof solutionsInput === 'object' &&
+      Array.isArray(solutionsInput.solutions)
+    ) {
+      normalized = { ...solutionsInput, solutions: solutionsInput.solutions };
+    } else {
+      throw new Error('Invalid solutions format. Expected { solutions: [...] } or [...]');
+    }
+
+    const { data, error } = await supabase
+      .from('solution_sets')
+      .update({
+        solutions: normalized,
+        total_solutions: normalized.solutions.length,
+      })
+      .eq('id', solutionSetId)
+      .select(`
+        *,
+        book:books(id, name, display_name),
+        chapter:chapters(id, name, display_name, chapter_number),
+        question_set:question_sets(id, name, total_questions)
+      `)
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
    * Link a solution set to a question set
    * @param {string} solutionSetId - ID of the solution set
    * @param {string} questionSetId - ID of the question set to link

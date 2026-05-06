@@ -136,6 +136,36 @@ router.post('/:id/link', asyncHandler(async (req, res) => {
   res.json({ success: true, data: solutionSet });
 }));
 
+// Replace the solutions JSON for an existing solution set.
+router.put('/:id', asyncHandler(async (req, res) => {
+  const { solutions } = req.body;
+  if (solutions === undefined || solutions === null) {
+    return res.status(400).json({
+      success: false,
+      error: 'solutions is required',
+    });
+  }
+
+  let parsed = solutions;
+  if (typeof solutions === 'string') {
+    try {
+      parsed = JSON.parse(solutions);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid JSON format for solutions',
+      });
+    }
+  }
+
+  try {
+    const updated = await solutionExtractionService.updateSolutions(req.params.id, parsed);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
+  }
+}));
+
 // Delete solution set
 router.delete('/:id', asyncHandler(async (req, res) => {
   await solutionExtractionService.delete(req.params.id);
